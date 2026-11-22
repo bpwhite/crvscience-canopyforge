@@ -1,0 +1,84 @@
+\documentclass[10pt,letterpaper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[margin=0.65in]{geometry}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\title{\textbf{CanopyForge: 3D Isometric Pacific Northwest Old-Growth Watershed Recovery and Ecological Stewardship Simulator in Rust}}
+\author{Bryan P. White (ORCID: \href{https://orcid.org/0000-0003-4191-3511}{0000-0003-4191-3511}) \\ CRV Science Labs \\ \small CRV Science Apps Hub: \url{https://crvscience.com/apps} \\ \small DOI: \href{https://doi.org/10.5281/zenodo.24442091}{10.5281/zenodo.24442091}}
+\date{November 2026 \\ \small Preprint ID: APP-PREPRINT-23 (v1.0.0 Software Preprint) \\ \small Categories: q-bio.PE \textbullet{} cs.GR \textbullet{} cs.MA}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+CanopyForge (v1.0.0) is a hardware-accelerated 3D isometric Pacific Northwest (PNW) old-growth watershed recovery and ecological stewardship simulator written in memory-safe Rust across core library modules under GPL-3.0-or-later licensing. Across a 16 x 16 spatial watershed lattice (256 sectors spanning five ecotypes: Remnant Old-Growth Core, Dense Second-Growth Plantation, Incised Salmonid Creek Corridor, Degraded Clearcut Edge, and Upland Oak-Conifer Meadow Ridge), autonomous restoration crews and canopy LiDAR drones execute budget-constrained treatments---variable-density crosscut thinning, prescribed underburns, invasive suppression, Beaver Dam Analogue (BDA) installation, native mycorrhizal underplanting, and snag cavity creation---while strict site-compatibility invariants guarantee mismatched interventions never degrade ecosystem state. The custom three-pass WGPU renderer renders sculpted continuous terrain over columnar basalt cliffs, 2048 x 2048 directional shadow maps, 4x MSAA HDR lighting, animated dual-wave creek water with woven-willow BDAs, and six articulated PNW fauna guilds (Northern Spotted Owl, Oregon Coast Coho Salmon, North American Beaver, Roosevelt Elk, Marbled Murrelet, and Northern Flying Squirrel). Across 8/8 passing tests and deterministic 15-year CLI sweeps (seed 2026), the watershed Ecological Recovery Index (ERI) rises monotonically from 40.42/100 (Year 1, annual grant USD 278,600) to 55.07 (Year 5), 66.92 (Year 8, replicated at 67.10 on seed 1994), and 77.17/100 by Year 15 (annual grant USD 484,800), with Oregon Coast Coho Salmon recovering to 413.0 / 420.0 K (98.3\%).
+\end{abstract}
+
+\section{Introduction and Silvicultural Recovery Mechanics}
+Restoring degraded Pacific Northwest watersheds requires balancing uneven-aged structural complexity, wildfire fuel continuity under rising summer vapor pressure deficit (VPD), incised riparian creek stabilization, and marine-derived nutrient feedbacks between spawning Coho salmon and riparian forests. CanopyForge v1.0.0 unifies those interacting ecological feedback loops inside an offline native Rust simulator backed by a three-pass WGPU 3D renderer and deterministic CLI audit harness.
+
+\section{Three-Pass WGPU Rendering and Zero-Harm Stewardship Rules}
+The graphics pipeline in src/wgpu\_renderer.rs executes a 2048 x 2048 Depth32Float sun shadow pass, a 4x MSAA Rgba16Float HDR physically based PBR pass with procedural 3D noise bark mottling and animated dual-wave creek Fresnel reflections, and an ACES filmic tonemap pass across both live interactive viewports and 1600 x 1000 offscreen PNG captures. Ecological interventions enforce site compatibility via evaluate\_and\_apply\_action in src/strategies.rs so out-of-place prescriptions resolve cleanly to No Effect without charging funds or harming stands.
+
+\section{Multi-Year Validation Sweeps and Wildlife Demography}
+All 8 unit and integration tests pass. Across deterministic 15-year CLI sweeps (seed 2026), Ecological Recovery Index advances steadily from 40.42 (Year 1) through 55.07 (Year 5), 66.92 (Year 8, reproduced at 67.10 with seed 1994), to 77.17/100 at Year 15. Mean old-growth structural maturity reaches 76.9\%, riparian BDA/LWD coverage reaches 100\%, mean burn risk remains buffered at 4.20\% even during a SevereVpdDrought cycle, and annual stewardship grants scale from USD 278,600 to USD 484,800.
+
+\begin{thebibliography}{27}
+\bibitem{ref1} Franklin, J. F., et al. (2002). Disturbances and structural development of natural forest ecosystems with silvicultural implications, using Douglas-fir forests as an example. Forest Ecology and Management, 155(1--3), 399--423. \url{https://doi.org/10.1016/s0378-1127(01)00575-8}
+
+\bibitem{ref2} Pollock, M. M., et al. (2014). Using Beaver Dams to Restore Incised Stream Ecosystems. BioScience, 64(4), 279--290. \url{https://doi.org/10.1093/biosci/biu036}
+
+\bibitem{ref3} Agee, J. K., \& Skinner, C. N. (2005). Basic principles of forest fuel reduction treatments. Forest Ecology and Management, 211(1--2), 83--96. \url{https://doi.org/10.1016/j.foreco.2005.01.034}
+
+\bibitem{ref4} Dugger, K. M., et al. (2015). The effects of habitat, climate, and Barred Owls on long-term demography of Northern Spotted Owls. The Condor, 118(1), 57--116. \url{https://doi.org/10.1650/condor-15-24.1}
+
+\bibitem{ref5} Bilby, R. E., Fransen, B. R., \& Bisson, P. A. (1996). Incorporation of nitrogen and carbon from spawning coho salmon into the trophic system of small streams: evidence from stable isotopes. Canadian Journal of Fisheries and Aquatic Sciences, 53(1), 164--173. \url{https://doi.org/10.1139/f95-159}
+
+\bibitem{ref6} White, B. P. (2026). The CRV Science App Network: Twenty-Two Open-Source Rust Programs for Science, Data, and Simulation. CRV Science App Preprint APP-PREPRINT-01 [cs.SE, cs.CE, q-bio.QM], v1.2.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222398}
+
+\bibitem{ref7} White, B. P. (2026). AeroFlyway: Tracking Bird Migration with Weather Radar, Skyglow Maps, and Nighttime Flight Calls. CRV Science App Preprint APP-PREPRINT-13 [q-bio.PE, physics.ao-ph, cs.GR], v0.6.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222366}
+
+\bibitem{ref8} White, B. P. (2026). BeoFold: Simulating How Proteins Fold Using Distributed Computing and State Networks. CRV Science App Preprint APP-PREPRINT-02 [q-bio.BM, physics.chem-ph, cs.DC], v1.4.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222370}
+
+\bibitem{ref9} White, B. P. (2026). Calc-Lab: Interactive Calculus, Linear Algebra, and Differential Equation Solver Workbench. CRV Science App Preprint APP-PREPRINT-03 [math.NA, cs.MS, cs.CY], v0.5.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222372}
+
+\bibitem{ref10} White, B. P. (2026). Causal-Atlas: Tracing How Genes and Drugs Turn Biological Pathways On and Off. CRV Science App Preprint APP-PREPRINT-04 [q-bio.MN, q-bio.GN, stat.ML], v0.2.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222376}
+
+\bibitem{ref11} White, B. P. (2026). Cit-Atlas: Mapping Citation Networks and Research Impact Across Scientific Papers. CRV Science App Preprint APP-PREPRINT-05 [cs.DL, cs.SI, physics.soc-ph], v1.8.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222380}
+
+\bibitem{ref12} White, B. P. (2026). EpiLedger: Privacy-Safe Disease Tracking, Clinical Text Screening, and Outbreak Monitoring. CRV Science App Preprint APP-PREPRINT-06 [cs.CR, q-bio.PE, stat.AP], v2.0.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222382}
+
+\bibitem{ref13} White, B. P. (2026). ITME: Modeling Evolutionary Regimes, Contingency, and Substrate Complexity Across Molecular, Hominid, and AI Worlds. CRV Science App Preprint APP-PREPRINT-07 [q-bio.PE, nlin.AO, physics.bio-ph], v2.3.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222386}
+
+\bibitem{ref14} White, B. P. (2026). OSABT: A 20-Module Biology and Biostatistics Workbench for Molecular Labs, Genetics, Kinetics, and Ecology. CRV Science App Preprint APP-PREPRINT-08 [q-bio.QM, stat.AP, cs.SE], v2.0.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222388}
+
+\bibitem{ref15} White, B. P. (2026). SAR-Atlas: Drug Design, Body Distribution Modeling, and Candidate Screening in Rust. CRV Science App Preprint APP-PREPRINT-09 [physics.chem-ph, q-bio.BM, cs.LG], v3.8.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222390}
+
+\bibitem{ref16} White, B. P. (2026). TerraTwin: Fast Climate Projections for Global Warming, Sea-Level Rise, and Arctic Change. CRV Science App Preprint APP-PREPRINT-10 [physics.ao-ph, cs.CE, stat.AP], v2.5.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222392}
+
+\bibitem{ref17} White, B. P. (2026). Urban-Grid: Modeling City Traffic, Emergency Response Coverage, and Earthquake Evacuation. CRV Science App Preprint APP-PREPRINT-11 [physics.soc-ph, cs.MA, cs.CE], v5.2.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222394}
+
+\bibitem{ref18} White, B. P. (2026). WildFront BattleGrounds: Turn-Based Hex Strategy Game with Voxel Graphics and Procedural Map Generation. CRV Science App Preprint APP-PREPRINT-12 [cs.GT, cs.GR, math.CO], v3.4.1. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24222396}
+
+\bibitem{ref19} White, B. P. (2026). HelioProbe: Simulating Spacecraft Orbits, Deep-Space Telescopes, and Comet Tails in 3D. CRV Science App Preprint APP-PREPRINT-14 [astro-ph.EP, astro-ph.IM, cs.GR], v2.3.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24244083}
+
+\bibitem{ref20} White, B. P. (2026). PopBio-Studio: Interactive Population Biology, Adaptive Landscapes, and Genetic Skyline Simulator. CRV Science App Preprint APP-PREPRINT-15 [q-bio.PE, q-bio.QM, stat.AP], v1.2.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24244085}
+
+\bibitem{ref21} White, B. P. (2026). QuantaCrypt-Studio: Simulating Quantum Circuits, Quantum Key Distribution, and Post-Quantum Cryptography. CRV Science App Preprint APP-PREPRINT-16 [quant-ph, cs.CR, cs.MS], v2.2.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24244089}
+
+\bibitem{ref22} White, B. P. (2026). SonoWing: Analyzing Bat Echolocation and Bird Calls with Spectrograms and Harmonic Tracking. CRV Science App Preprint APP-PREPRINT-17 [q-bio.NC, q-bio.PE, cs.SD], v1.1.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24244091}
+
+\bibitem{ref23} White, B. P. (2026). SwarmForge: 3D Isometric Automated Factory and Swarm Robotics Simulation Game. CRV Science App Preprint APP-PREPRINT-18 [cs.MA, cs.RO, cs.GT], v1.3.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24244093}
+
+\bibitem{ref24} White, B. P. (2026). NeuroSpace Lab: 3D Neural Network Topology, Structural Plasticity, and Six-Layered Cerebral Cortex Simulation in Rust. CRV Science App Preprint APP-PREPRINT-19 [q-bio.NC, cs.NE, cs.GR], v1.6.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24263468}
+
+\bibitem{ref25} White, B. P. (2026). TrophicHearth: Nine-Biome 3D Living Trophic Diorama, Fire-Pit Hearth, and Bioacoustic Ecosystem Simulator in Rust. CRV Science App Preprint APP-PREPRINT-20 [q-bio.PE, cs.GR, cs.MA], v0.9.3. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24359107}
+
+\bibitem{ref26} White, B. P. (2026). ConnectomeAtlas: Standalone 3D Multi-Scale Brain Connectome, Persistent Homology, and Lesion Workstation in Rust. CRV Science App Preprint APP-PREPRINT-21 [q-bio.NC, cs.SI, cs.GR], v0.8.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24359109}
+
+\bibitem{ref27} White, B. P. (2026). PelagicGlobe: 3D Ocean Currents Globe, Conformal Spilhaus World Ocean Projection, and NOAA ENSO Workstation in Rust. CRV Science App Preprint APP-PREPRINT-22 [physics.ao-ph, cs.GR, cs.CE], v1.1.0. Hosted via CRV Science Apps Hub (https://crvscience.com/apps). \url{https://doi.org/10.5281/zenodo.24442089}
+\end{thebibliography}
+\end{document}

@@ -1,0 +1,309 @@
+{
+  "app": "CanopyForge",
+  "repo": "crvscience-canopyforge",
+  "version": "1.0.0",
+  "license": "GPL-3.0-or-later",
+  "repository": "https://github.com/bpwhite/crvscience-canopyforge",
+  "binary": "22_CanopyForge.exe",
+  "preprintId": "APP-PREPRINT-23",
+  "slug": "canopyforge-3d-pnw-old-growth-recovery",
+  "gridDimensions": "16x16 tiles (256 watershed sectors)",
+  "ecotypesCount": 5,
+  "wildlifeSpeciesCount": 6,
+  "testsPassed": 8,
+  "testsTotal": 8,
+  "cargo_tests": {
+    "unit_and_integration": 8,
+    "passed": 8,
+    "failed": 0
+  },
+  "unsafeCode": "forbidden_in_library_core_gpl3",
+  "multiYearTrajectorySeed2026": [
+    {
+      "seed": 2026,
+      "yearsSimulated": 1,
+      "endYear": 2,
+      "eriScore": 40.42,
+      "annualGrantUsd": 278600,
+      "climateRegime": "WarmDrySummer",
+      "meanBurnRisk": 0.0319,
+      "meanInvasiveCover": 0.3726,
+      "meanOldGrowthMaturity": 0.4249,
+      "meanRiparianBdaLwd": 0.229,
+      "populations": [
+        {
+          "species": "NorthernSpottedOwl",
+          "count": 5.19,
+          "carryingCapacity": 31.37,
+          "annualRecoveryPct": 26.16
+        },
+        {
+          "species": "OregonCoastCohoSalmon",
+          "count": 61.44,
+          "carryingCapacity": 245.67,
+          "annualRecoveryPct": 39.48
+        },
+        {
+          "species": "NorthAmericanBeaver",
+          "count": 3.73,
+          "carryingCapacity": 10.79,
+          "annualRecoveryPct": 23.21
+        },
+        {
+          "species": "RooseveltElk",
+          "count": 9.98,
+          "carryingCapacity": 16.21,
+          "annualRecoveryPct": 10.14
+        },
+        {
+          "species": "MarbledMurrelet",
+          "count": 7.4,
+          "carryingCapacity": 37.01,
+          "annualRecoveryPct": 21.32
+        },
+        {
+          "species": "NorthernFlyingSquirrel",
+          "count": 27.23,
+          "carryingCapacity": 144.68,
+          "annualRecoveryPct": 40.42
+        }
+      ],
+      "stdout": "Completed 1 simulated PNW watershed years | ERI: 40.42/100 | Next Grant: $278600\n  - Northern Spotted Owl       (Strix occidentalis caurina    ):    5.2 / K   31.4 (+26.2%/yr)\n  - Oregon Coast Coho Salmon   (Oncorhynchus kisutch          ):   61.4 / K  245.7 (+39.5%/yr)\n  - North American Beaver      (Castor canadensis             ):    3.7 / K   10.8 (+23.2%/yr)\n  - Roosevelt Elk              (Cervus canadensis roosevelti  ):   10.0 / K   16.2 (+10.1%/yr)\n  - Marbled Murrelet           (Brachyramphus marmoratus      ):    7.4 / K   37.0 (+21.3%/yr)\n  - Northern Flying Squirrel   (Glaucomys sabrinus            ):   27.2 / K  144.7 (+40.4%/yr)\nExported JSON save snapshot to validation/cf_sweep_2026_1.json"
+    },
+    {
+      "seed": 2026,
+      "yearsSimulated": 5,
+      "endYear": 6,
+      "eriScore": 55.07,
+      "annualGrantUsd": 385100,
+      "climateRegime": "WarmDrySummer",
+      "meanBurnRisk": 0.0632,
+      "meanInvasiveCover": 0.4718,
+      "meanOldGrowthMaturity": 0.5236,
+      "meanRiparianBdaLwd": 0.7836,
+      "populations": [
+        {
+          "species": "NorthernSpottedOwl",
+          "count": 12.63,
+          "carryingCapacity": 48,
+          "annualRecoveryPct": 18.96
+        },
+        {
+          "species": "OregonCoastCohoSalmon",
+          "count": 207.04,
+          "carryingCapacity": 420,
+          "annualRecoveryPct": 24.28
+        },
+        {
+          "species": "NorthAmericanBeaver",
+          "count": 10.27,
+          "carryingCapacity": 31.02,
+          "annualRecoveryPct": 23.91
+        },
+        {
+          "species": "RooseveltElk",
+          "count": 13.42,
+          "carryingCapacity": 17.7,
+          "annualRecoveryPct": 6.16
+        },
+        {
+          "species": "MarbledMurrelet",
+          "count": 15.48,
+          "carryingCapacity": 52.99,
+          "annualRecoveryPct": 16.06
+        },
+        {
+          "species": "NorthernFlyingSquirrel",
+          "count": 92.63,
+          "carryingCapacity": 202.42,
+          "annualRecoveryPct": 22.75
+        }
+      ],
+      "stdout": "Completed 5 simulated PNW watershed years | ERI: 55.07/100 | Next Grant: $385100\n  - Northern Spotted Owl       (Strix occidentalis caurina    ):   12.6 / K   48.0 (+19.0%/yr)\n  - Oregon Coast Coho Salmon   (Oncorhynchus kisutch          ):  207.0 / K  420.0 (+24.3%/yr)\n  - North American Beaver      (Castor canadensis             ):   10.3 / K   31.0 (+23.9%/yr)\n  - Roosevelt Elk              (Cervus canadensis roosevelti  ):   13.4 / K   17.7 (+6.2%/yr)\n  - Marbled Murrelet           (Brachyramphus marmoratus      ):   15.5 / K   53.0 (+16.1%/yr)\n  - Northern Flying Squirrel   (Glaucomys sabrinus            ):   92.6 / K  202.4 (+22.7%/yr)\nExported JSON save snapshot to validation/cf_sweep_2026_5.json"
+    },
+    {
+      "seed": 2026,
+      "yearsSimulated": 8,
+      "endYear": 9,
+      "eriScore": 66.92,
+      "annualGrantUsd": 440400,
+      "climateRegime": "NormalMaritime",
+      "meanBurnRisk": 0.0929,
+      "meanInvasiveCover": 0.5254,
+      "meanOldGrowthMaturity": 0.599,
+      "meanRiparianBdaLwd": 1,
+      "populations": [
+        {
+          "species": "NorthernSpottedOwl",
+          "count": 20.12,
+          "carryingCapacity": 48,
+          "annualRecoveryPct": 12.86
+        },
+        {
+          "species": "OregonCoastCohoSalmon",
+          "count": 321.24,
+          "carryingCapacity": 420,
+          "annualRecoveryPct": 10.88
+        },
+        {
+          "species": "NorthAmericanBeaver",
+          "count": 19.13,
+          "carryingCapacity": 39.93,
+          "annualRecoveryPct": 17.4
+        },
+        {
+          "species": "RooseveltElk",
+          "count": 15.99,
+          "carryingCapacity": 20.23,
+          "annualRecoveryPct": 5.37
+        },
+        {
+          "species": "MarbledMurrelet",
+          "count": 24.08,
+          "carryingCapacity": 64,
+          "annualRecoveryPct": 12.98
+        },
+        {
+          "species": "NorthernFlyingSquirrel",
+          "count": 157.94,
+          "carryingCapacity": 240.51,
+          "annualRecoveryPct": 13.85
+        }
+      ],
+      "stdout": "Completed 8 simulated PNW watershed years | ERI: 66.92/100 | Next Grant: $440400\n  - Northern Spotted Owl       (Strix occidentalis caurina    ):   20.1 / K   48.0 (+12.9%/yr)\n  - Oregon Coast Coho Salmon   (Oncorhynchus kisutch          ):  321.2 / K  420.0 (+10.9%/yr)\n  - North American Beaver      (Castor canadensis             ):   19.1 / K   39.9 (+17.4%/yr)\n  - Roosevelt Elk              (Cervus canadensis roosevelti  ):   16.0 / K   20.2 (+5.4%/yr)\n  - Marbled Murrelet           (Brachyramphus marmoratus      ):   24.1 / K   64.0 (+13.0%/yr)\n  - Northern Flying Squirrel   (Glaucomys sabrinus            ):  157.9 / K  240.5 (+13.8%/yr)\nExported JSON save snapshot to validation/cf_sweep_2026_8.json"
+    },
+    {
+      "seed": 2026,
+      "yearsSimulated": 15,
+      "endYear": 16,
+      "eriScore": 77.17,
+      "annualGrantUsd": 484800,
+      "climateRegime": "SevereVpdDrought",
+      "meanBurnRisk": 0.042,
+      "meanInvasiveCover": 0.6273,
+      "meanOldGrowthMaturity": 0.7691,
+      "meanRiparianBdaLwd": 1,
+      "populations": [
+        {
+          "species": "NorthernSpottedOwl",
+          "count": 36.01,
+          "carryingCapacity": 48,
+          "annualRecoveryPct": 4.88
+        },
+        {
+          "species": "OregonCoastCohoSalmon",
+          "count": 413,
+          "carryingCapacity": 420,
+          "annualRecoveryPct": 0.76
+        },
+        {
+          "species": "NorthAmericanBeaver",
+          "count": 36.44,
+          "carryingCapacity": 40.36,
+          "annualRecoveryPct": 3.06
+        },
+        {
+          "species": "RooseveltElk",
+          "count": 19.94,
+          "carryingCapacity": 22.41,
+          "annualRecoveryPct": 2.7
+        },
+        {
+          "species": "MarbledMurrelet",
+          "count": 44.31,
+          "carryingCapacity": 64,
+          "annualRecoveryPct": 5.47
+        },
+        {
+          "species": "NorthernFlyingSquirrel",
+          "count": 280.7,
+          "carryingCapacity": 319.18,
+          "annualRecoveryPct": 4.74
+        }
+      ],
+      "stdout": "Completed 15 simulated PNW watershed years | ERI: 77.17/100 | Next Grant: $484800\n  - Northern Spotted Owl       (Strix occidentalis caurina    ):   36.0 / K   48.0 (+4.9%/yr)\n  - Oregon Coast Coho Salmon   (Oncorhynchus kisutch          ):  413.0 / K  420.0 (+0.8%/yr)\n  - North American Beaver      (Castor canadensis             ):   36.4 / K   40.4 (+3.1%/yr)\n  - Roosevelt Elk              (Cervus canadensis roosevelti  ):   19.9 / K   22.4 (+2.7%/yr)\n  - Marbled Murrelet           (Brachyramphus marmoratus      ):   44.3 / K   64.0 (+5.5%/yr)\n  - Northern Flying Squirrel   (Glaucomys sabrinus            ):  280.7 / K  319.2 (+4.7%/yr)\nExported JSON save snapshot to validation/cf_sweep_2026_15.json"
+    }
+  ],
+  "replicateSeed1994_8yr": {
+    "seed": 1994,
+    "yearsSimulated": 8,
+    "endYear": 9,
+    "eriScore": 67.1,
+    "annualGrantUsd": 441100,
+    "climateRegime": "NormalMaritime",
+    "meanBurnRisk": 0.0768,
+    "meanInvasiveCover": 0.5333,
+    "meanOldGrowthMaturity": 0.5996,
+    "meanRiparianBdaLwd": 1,
+    "populations": [
+      {
+        "species": "NorthernSpottedOwl",
+        "count": 20.15,
+        "carryingCapacity": 48,
+        "annualRecoveryPct": 12.85
+      },
+      {
+        "species": "OregonCoastCohoSalmon",
+        "count": 324.34,
+        "carryingCapacity": 420,
+        "annualRecoveryPct": 10.54
+      },
+      {
+        "species": "NorthAmericanBeaver",
+        "count": 19.11,
+        "carryingCapacity": 37.62,
+        "annualRecoveryPct": 16.42
+      },
+      {
+        "species": "RooseveltElk",
+        "count": 15.44,
+        "carryingCapacity": 18.47,
+        "annualRecoveryPct": 4.14
+      },
+      {
+        "species": "MarbledMurrelet",
+        "count": 24.08,
+        "carryingCapacity": 64,
+        "annualRecoveryPct": 12.98
+      },
+      {
+        "species": "NorthernFlyingSquirrel",
+        "count": 157.46,
+        "carryingCapacity": 239.07,
+        "annualRecoveryPct": 13.77
+      }
+    ],
+    "stdout": "Completed 8 simulated PNW watershed years | ERI: 67.10/100 | Next Grant: $441100\n  - Northern Spotted Owl       (Strix occidentalis caurina    ):   20.2 / K   48.0 (+12.8%/yr)\n  - Oregon Coast Coho Salmon   (Oncorhynchus kisutch          ):  324.3 / K  420.0 (+10.5%/yr)\n  - North American Beaver      (Castor canadensis             ):   19.1 / K   37.6 (+16.4%/yr)\n  - Roosevelt Elk              (Cervus canadensis roosevelti  ):   15.4 / K   18.5 (+4.1%/yr)\n  - Marbled Murrelet           (Brachyramphus marmoratus      ):   24.1 / K   64.0 (+13.0%/yr)\n  - Northern Flying Squirrel   (Glaucomys sabrinus            ):  157.5 / K  239.1 (+13.8%/yr)\nExported JSON save snapshot to validation/cf_sweep_1994_8.json"
+  },
+  "headless_screenshots": [
+    {
+      "view": 1,
+      "preset": "FullWatershedIsometric",
+      "file": "validation/headless_screenshot.png",
+      "width": 1600,
+      "height": 1000,
+      "bytes": 1272464
+    },
+    {
+      "view": 2,
+      "preset": "MidCanopyStandZoom",
+      "file": "validation/headless_screenshot_2.png",
+      "width": 1600,
+      "height": 1000,
+      "bytes": 1245449
+    },
+    {
+      "view": 3,
+      "preset": "SalmonAndBeaverCreekZoom",
+      "file": "validation/headless_screenshot_3.png",
+      "width": 1600,
+      "height": 1000,
+      "bytes": 921110
+    }
+  ],
+  "screenshots": [
+    "validation/headless_screenshot.png",
+    "validation/headless_screenshot_2.png",
+    "validation/headless_screenshot_3.png"
+  ]
+}

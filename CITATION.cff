@@ -1,0 +1,47 @@
+cff-version: 1.2.0
+message: "If you use this software or its validation telemetry, please cite both the software repository and the CRV Science Public Apps Network."
+type: software
+title: "CanopyForge: 3D Isometric Pacific Northwest Old-Growth Ecosystem Recovery Simulator"
+version: "1.0.0"
+date-released: "2026-11-22"
+doi: "10.5281/zenodo.24442091"
+url: "https://crvscience.com/apps"
+repository-code: "https://github.com/bpwhite/crvscience-canopyforge"
+license: "GPL-3.0-or-later"
+authors:
+  - family-names: "White"
+    given-names: "Bryan P."
+    affiliation: "CRV Science Labs"
+    orcid: "https://orcid.org/0000-0003-4191-3511"
+keywords:
+  - "forest ecology"
+  - "Pacific Northwest old-growth"
+  - "wildfire resilience"
+  - "watershed restoration"
+  - "Rust"
+preferred-citation:
+  type: article
+  title: "CanopyForge: 3D Isometric Pacific Northwest Old-Growth Watershed Recovery and Ecological Stewardship Simulator in Rust"
+  authors:
+    - family-names: "White"
+      given-names: "Bryan P."
+      affiliation: "CRV Science Labs"
+      orcid: "https://orcid.org/0000-0003-4191-3511"
+  year: 2026
+  journal: "CRV Science Apps Preprints"
+  doi: "10.5281/zenodo.24442091"
+  url: "https://crvscience.com/apps/preprints/canopyforge-3d-pnw-old-growth-recovery"
+  notes: "Preprint ID: APP-PREPRINT-23"
+references:
+  - type: article
+    title: "The CRV Science App Network: Twenty-Two Open-Source Rust Programs for Science, Data, and Simulation"
+    authors:
+      - family-names: "White"
+        given-names: "Bryan P."
+        affiliation: "CRV Science Labs"
+        orcid: "https://orcid.org/0000-0003-4191-3511"
+    year: 2026
+    journal: "CRV Science Apps Preprints"
+    doi: "10.5281/zenodo.24222398"
+    url: "https://crvscience.com/apps/preprints/crv-science-public-apps-network"
+    notes: "Preprint ID: APP-PREPRINT-01 (CRV Science Open-Source Apps Network Overview)"
