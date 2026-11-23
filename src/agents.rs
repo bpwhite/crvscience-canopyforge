@@ -80,6 +80,17 @@ impl WildlifeSpecies {
             Self::NorthernFlyingSquirrel => 0.36,
         }
     }
+
+    pub fn unit_label(self) -> &'static str {
+        match self {
+            Self::NorthernSpottedOwl => "256 ha habitat idx",
+            Self::OregonCoastCohoSalmon => "spawners",
+            Self::NorthAmericanBeaver => "individuals",
+            Self::RooseveltElk => "individuals",
+            Self::MarbledMurrelet => "individuals",
+            Self::NorthernFlyingSquirrel => "individuals",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -143,10 +154,10 @@ pub fn initial_species_populations(tiles: &[TileState]) -> Vec<SpeciesPopulation
     let mut pops = vec![
         SpeciesPopulation {
             species: WildlifeSpecies::NorthernSpottedOwl,
-            count: 4.0,
-            carrying_capacity: 6.0,
+            count: 2.0,
+            carrying_capacity: 4.0,
             annual_recovery_rate_pct: 0.0,
-            baseline_count: 4.0,
+            baseline_count: 2.0,
         },
         SpeciesPopulation {
             species: WildlifeSpecies::OregonCoastCohoSalmon,
@@ -240,9 +251,11 @@ pub fn update_carrying_capacities(pops: &mut [SpeciesPopulation], tiles: &[TileS
 
     for p in pops.iter_mut() {
         p.carrying_capacity = match p.species {
+            // Calibrated to a 256 ha sub-basin habitat suitability index (0..12 eq. territory units,
+            // reflecting real ~1,000+ ha home ranges extending beyond the focal watershed core).
             WildlifeSpecies::NorthernSpottedOwl => {
-                (2.0 + og_habitat * 0.34 + snag_platforms * 0.22 + squirrel_count * 0.08)
-                    .clamp(2.0, 48.0)
+                (1.5 + og_habitat * 0.085 + snag_platforms * 0.055 + squirrel_count * 0.022)
+                    .clamp(1.5, 12.0)
             }
             WildlifeSpecies::OregonCoastCohoSalmon => {
                 (18.0 + salmon_stream_quality * 7.8).clamp(15.0, 420.0)
@@ -294,7 +307,7 @@ pub fn compute_wildlife_recovery_score(pops: &[SpeciesPopulation]) -> f32 {
     let mut acc = 0.0_f32;
     for p in pops {
         let target = match p.species {
-            WildlifeSpecies::NorthernSpottedOwl => 26.0,
+            WildlifeSpecies::NorthernSpottedOwl => 8.0,
             WildlifeSpecies::OregonCoastCohoSalmon => 260.0,
             WildlifeSpecies::NorthAmericanBeaver => 24.0,
             WildlifeSpecies::RooseveltElk => 48.0,
@@ -592,7 +605,7 @@ pub fn sync_and_step_visible_animals(
     // Target visible 3D mesh instances per species scales smoothly with real population
     for pop in pops {
         let desired_vis = match pop.species {
-            WildlifeSpecies::NorthernSpottedOwl => ((pop.count * 0.35).ceil() as usize).clamp(1, 8),
+            WildlifeSpecies::NorthernSpottedOwl => ((pop.count * 0.5).ceil() as usize).clamp(1, 6),
             WildlifeSpecies::OregonCoastCohoSalmon => {
                 ((pop.count * 0.06).ceil() as usize).clamp(2, 18)
             }
@@ -608,7 +621,8 @@ pub fn sync_and_step_visible_animals(
 
         let current_vis = agents.iter().filter(|a| a.species == pop.species).count();
         if current_vis < desired_vis {
-            for _ in current_vis..desired_vis {
+            let next_base_id = agents.iter().map(|a| a.id).max().unwrap_or(99) + 1;
+            for offset in 0..(desired_vis - current_vis) {
                 let spawn_pos = pick_habitat_waypoint(pop.species, tiles, rng);
                 let next_pos = pick_habitat_waypoint(pop.species, tiles, rng);
                 let init_dir = next_pos - spawn_pos;
@@ -617,7 +631,7 @@ pub fn sync_and_step_visible_animals(
                 } else {
                     0.0
                 };
-                let id = (agents.len() as u32) + 100;
+                let id = next_base_id + offset as u32;
                 agents.push(VisibleAnimalAgent {
                     id,
                     species: pop.species,
@@ -634,6 +648,16 @@ pub fn sync_and_step_visible_animals(
                         WildlifeSpecies::NorthernFlyingSquirrel => 3.9,
                     },
                 });
+            }
+        } else if current_vis > desired_vis {
+            let mut to_remove = current_vis - desired_vis;
+            let mut i = agents.len();
+            while i > 0 && to_remove > 0 {
+                i -= 1;
+                if agents[i].species == pop.species {
+                    agents.remove(i);
+                    to_remove -= 1;
+                }
             }
         }
     }
@@ -716,4 +740,53 @@ fn pick_habitat_waypoint(
         WildlifeSpecies::RooseveltElk => 0.02,
     };
     Vec3::new(wx, smooth_y + height_offset, wz)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ecology::build_initial_watershed;
+    use rand::SeedableRng;
+
+    #[test]
+    fn sync_and_step_visible_animals_prunes_agents_when_population_drops() {
+        let mut rng = ChaCha8Rng::seed_from_u64(42);
+        let tiles = build_initial_watershed(&mut rng);
+        let mut pops = initial_species_populations(&tiles);
+        for p in &mut pops {
+            if p.species == WildlifeSpecies::OregonCoastCohoSalmon {
+                p.count = 260.0;
+            }
+        }
+        let mut agents = Vec::new();
+        sync_and_step_visible_animals(&mut agents, &pops, &tiles, 0.016, &mut rng);
+        let high_count = agents
+            .iter()
+            .filter(|a| a.species == WildlifeSpecies::OregonCoastCohoSalmon)
+            .count();
+        assert!(high_count >= 14, "Expected high visible salmon count, got {high_count}");
+
+        // Drop population drastically and ensure excess visible agents are pruned
+        for p in &mut pops {
+            if p.species == WildlifeSpecies::OregonCoastCohoSalmon {
+                p.count = 15.0;
+            }
+        }
+        sync_and_step_visible_animals(&mut agents, &pops, &tiles, 0.016, &mut rng);
+        let low_count = agents
+            .iter()
+            .filter(|a| a.species == WildlifeSpecies::OregonCoastCohoSalmon)
+            .count();
+        assert_eq!(low_count, 2, "Excess visible salmon agents must be pruned down to 2");
+
+        let owl = pops
+            .iter()
+            .find(|p| p.species == WildlifeSpecies::NorthernSpottedOwl)
+            .expect("spotted owl present");
+        assert!(
+            owl.carrying_capacity <= 12.0,
+            "256 ha Spotted Owl sub-basin habitat index K should be <= 12.0 (got {})",
+            owl.carrying_capacity
+        );
+    }
 }

@@ -43,7 +43,7 @@ struct Cli {
     command: Option<Commands>,
 
     /// Deterministic RNG watershed generation seed
-    #[arg(long, default_value_t = 2026)]
+    #[arg(long, global = true, default_value_t = 2026)]
     seed: u64,
 
     /// Render an offscreen 1600x1000 RGBA PNG screenshot without opening a GUI window
@@ -120,11 +120,12 @@ fn main() -> eframe::Result<()> {
             );
             for pop in &app.populations {
                 println!(
-                    "  - {:<26} ({:<30}): {:>6.1} / K {:>6.1} ({:+.1}%/yr)",
+                    "  - {:<26} ({:<30}): {:>6.1} / K {:>6.1} {} ({:+.1}%/yr)",
                     pop.species.common_name(),
                     pop.species.scientific_name(),
                     pop.count,
                     pop.carrying_capacity,
+                    pop.species.unit_label(),
                     pop.annual_recovery_rate_pct
                 );
             }
@@ -158,5 +159,16 @@ mod tests {
             Some(PathBuf::from("validation/headless_screenshot_2.png"))
         );
         assert_eq!(parsed.screenshot_view, 2);
+    }
+
+    #[test]
+    fn cli_parses_simulate_subcommand_with_trailing_global_seed() {
+        let parsed = Cli::try_parse_from(["canopyforge", "simulate", "--years", "4", "--seed", "42"])
+            .expect("clap parses simulate with trailing --seed");
+        assert_eq!(parsed.seed, 42);
+        match parsed.command {
+            Some(Commands::Simulate { years, .. }) => assert_eq!(years, 4),
+            other => panic!("Expected Simulate command, got {:?}", other),
+        }
     }
 }

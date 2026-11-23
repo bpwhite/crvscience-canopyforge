@@ -71,12 +71,18 @@ fn vs_main(in: VertexInput) -> VertexOutput {
     var displaced = in.position + compute_wind_offset(in.position, in.mat_params.y, time);
     var nrm = normalize(in.normal);
 
-    // Subtle animated surface ripples on salmon creek & beaver pools
+    // Animated surface ripples aligned NE -> SW (-X, +Z) downstream along salmon creek
     if (abs(in.mat_params.z - 2.0) < 0.25) {
-        let wave1 = sin(in.position.x * 3.4 + time * 3.1) * 0.018;
-        let wave2 = cos(in.position.z * 4.1 - time * 2.6) * 0.015;
+        let flow_coord = -in.position.x * 0.80 + in.position.z * 0.60;
+        let cross_coord = in.position.x * 0.60 + in.position.z * 0.80;
+        let phase_f = flow_coord * 4.2 - time * 3.4;
+        let phase_c = cross_coord * 3.6 + sin(flow_coord * 2.1 - time * 2.4);
+        let wave1 = sin(phase_f) * 0.018;
+        let wave2 = cos(phase_c) * 0.014;
         displaced.y = displaced.y + wave1 + wave2;
-        nrm = normalize(vec3<f32>(-cos(in.position.x * 3.4 + time * 3.1) * 0.10, 1.0, sin(in.position.z * 4.1 - time * 2.6) * 0.10));
+        let df = cos(phase_f) * 0.11;
+        let dc = -sin(phase_c) * 0.08;
+        nrm = normalize(vec3<f32>(df * 0.80 - dc * 0.60, 1.0, -df * 0.60 - dc * 0.80));
     }
 
     out.world_pos = displaced;
@@ -179,11 +185,15 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let needle = procedural_detail(in.world_pos, 6.4);
         base_rgb = clamp(base_rgb * (1.0 + needle * 0.18), vec3<f32>(0.0), vec3<f32>(1.0));
     } else if (abs(mat_kind - 2.0) < 0.25) {
-        // Fragment-level animated dual-wave water normal perturbation for crisp creek sparkles
-        let rpx = in.world_pos.x * 8.5 + time * 3.4;
-        let rpz = in.world_pos.z * 9.2 - time * 2.8;
-        let ripple_x = cos(rpx + sin(rpz * 0.7)) * 0.16;
-        let ripple_z = sin(rpz - cos(rpx * 0.6)) * 0.16;
+        // Fragment-level NE -> SW (-X, +Z) downstream dual-wave water normal perturbation
+        let flow_u = -in.world_pos.x * 0.80 + in.world_pos.z * 0.60;
+        let cross_v = in.world_pos.x * 0.60 + in.world_pos.z * 0.80;
+        let r_flow = flow_u * 9.5 - time * 4.2;
+        let r_cross = cross_v * 8.2 + sin(flow_u * 4.5 - time * 3.0);
+        let rip_f = cos(r_flow) * 0.17;
+        let rip_c = sin(r_cross) * 0.14;
+        let ripple_x = -rip_f * 0.80 + rip_c * 0.60;
+        let ripple_z = rip_f * 0.60 + rip_c * 0.80;
         n = normalize(vec3<f32>(n.x + ripple_x, n.y, n.z + ripple_z));
     }
 
@@ -221,11 +231,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         lit = mix(lit, sky_refl, clamp(fresnel * 0.68, 0.08, 0.74)) + vec3<f32>(spec * 2.1);
     }
 
-    // Atmospheric coastal valley mist
+    // Atmospheric coastal valley mist modulated dynamically by summer VPD drought haze
+    let vpd = scene.sun_color_and_vpd.w;
+    let drought_haze = clamp((vpd - 1.55) / 2.2, 0.0, 1.0);
     let dist = length(scene.camera_pos.xyz - in.world_pos);
-    let height_mist = exp(-max(in.world_pos.y - 0.3, 0.0) * 0.24);
-    let fog_amount = clamp((1.0 - exp(-dist * scene.fog_color_and_density.w)) * (0.45 + 0.55 * height_mist), 0.0, 0.72);
-    let final_rgb = mix(lit, scene.fog_color_and_density.rgb, fog_amount);
+    let height_mist = exp(-max(in.world_pos.y - 0.3, 0.0) * (0.24 - 0.08 * drought_haze));
+    let eff_fog_density = scene.fog_color_and_density.w * (1.0 + drought_haze * 0.90);
+    let fog_rgb = mix(
+        scene.fog_color_and_density.rgb,
+        vec3<f32>(0.72, 0.56, 0.42),
+        drought_haze * 0.50,
+    );
+    let fog_amount = clamp((1.0 - exp(-dist * eff_fog_density)) * (0.45 + 0.55 * height_mist), 0.0, 0.76);
+    let final_rgb = mix(lit, fog_rgb, fog_amount);
 
     return vec4<f32>(final_rgb, in.color_alpha.a);
 }

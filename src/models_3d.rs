@@ -88,6 +88,16 @@ pub struct SceneMeshBuffers {
     pub alpha_vertex_count: u32,
 }
 
+#[derive(Clone)]
+pub struct StaticWatershedMeshCache {
+    pub opaque_bytes: Vec<u8>,
+    pub opaque_vertex_count: u32,
+    pub alpha_bytes: Vec<u8>,
+    pub alpha_vertex_count: u32,
+    pub overlay: MapOverlay,
+    pub season: Season,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct SpineStation {
     pos: Vec3,
@@ -631,18 +641,13 @@ pub fn build_watershed_scene_meshes(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
-pub fn build_watershed_scene_meshes_animated(
+/// Builds the heavy static terrain, cliff skirt, conifer stands, riparian creek, BDAs,
+/// invasives, cathedral sunbeams, and field station meshes (cached across frames via dirty flag).
+pub fn build_static_watershed_meshes(
     tiles: &[TileState],
-    crews: &[StewardCrew],
-    drones: &[CanopyLidarDrone],
-    animals: &[VisibleAnimalAgent],
-    selected_tile: Option<(usize, usize)>,
-    hovered_tile: Option<(usize, usize)>,
     overlay: MapOverlay,
     season: Season,
-    elapsed_sec: f32,
-) -> SceneMeshBuffers {
+) -> StaticWatershedMeshCache {
     let mut opaque = MeshBuilder::with_capacity(140_000);
     let mut alpha = MeshBuilder::with_capacity(10_000);
 
@@ -650,27 +655,7 @@ pub fn build_watershed_scene_meshes_animated(
     let half_span = (GRID_SIZE as f32) * CELL_PITCH * 0.5;
     build_sculpted_terrain(&mut opaque, tiles, half_span, overlay, season);
 
-    // Selection / hover 4-bar perimeter frame hugging terrain height
-    for &(coords, rim_col, y_bias) in &[
-        (selected_tile, [0.96, 0.82, 0.28, 1.0], 0.055),
-        (hovered_tile, [0.52, 0.90, 0.72, 1.0], 0.045),
-    ] {
-        if let Some((tx, tz)) = coords {
-            if let Some(tile) = tiles.get(tz * GRID_SIZE + tx) {
-                let c = tile_world_center(tile);
-                let h = CELL_PITCH * 0.485;
-                let thick = 0.065;
-                let rim_mp = [0.35, 0.0, 0.0, 1.0];
-                let y = c.y + y_bias;
-                opaque.push_box(Vec3::new(c.x, y, c.z - h), Vec3::new(h, 0.024, thick), 0.0, rim_col, rim_mp);
-                opaque.push_box(Vec3::new(c.x, y, c.z + h), Vec3::new(h, 0.024, thick), 0.0, rim_col, rim_mp);
-                opaque.push_box(Vec3::new(c.x - h, y, c.z), Vec3::new(thick, 0.024, h), 0.0, rim_col, rim_mp);
-                opaque.push_box(Vec3::new(c.x + h, y, c.z), Vec3::new(thick, 0.024, h), 0.0, rim_col, rim_mp);
-            }
-        }
-    }
-
-    // 2. Per-Tile Flora, Riparian Creek, BDAs, LWD, Snags, Nurse Logs, Invasives & Wildfire
+    // 2. Per-Tile Flora, Riparian Creek, BDAs, LWD, Snags, Nurse Logs & Invasives
     for tile in tiles {
         let center = tile_world_center(tile);
         let hash_seed = ((tile.x * 73856093) ^ (tile.z * 19349663)) as f32;
@@ -683,7 +668,6 @@ pub fn build_watershed_scene_meshes_animated(
             build_conifer_stand_tile(&mut opaque, tile, tiles, center, hash_seed);
         }
 
-        // Invasive Himalayan blackberry & Scotch broom
         if tile.blackberry_cover > 0.16 {
             build_blackberry_thicket(&mut opaque, tiles, center, tile.blackberry_cover, season, hash_seed);
         }
@@ -709,12 +693,69 @@ pub fn build_watershed_scene_meshes_animated(
                 false,
             );
         }
+    }
 
-        // Multi-layered active wildfire flames & smoke puffs
+    // 3. Pacific Northwest Timber Field Research Station at Tile (0, 0)
+    if let Some(t0) = tiles.first() {
+        build_field_research_station(&mut opaque, tiles, tile_world_center(t0));
+    }
+
+    let (opaque_bytes, opaque_vertex_count) = opaque.to_bytes();
+    let (alpha_bytes, alpha_vertex_count) = alpha.to_bytes();
+    StaticWatershedMeshCache {
+        opaque_bytes,
+        opaque_vertex_count,
+        alpha_bytes,
+        alpha_vertex_count,
+        overlay,
+        season,
+    }
+}
+
+/// Composes the cached static terrain/conifer geometry with per-frame dynamic agents,
+/// selection/hover rims, active wildfire flames, crews, drones, and wildlife.
+#[allow(clippy::too_many_arguments)]
+pub fn compose_watershed_scene_meshes(
+    static_cache: &StaticWatershedMeshCache,
+    tiles: &[TileState],
+    crews: &[StewardCrew],
+    drones: &[CanopyLidarDrone],
+    animals: &[VisibleAnimalAgent],
+    selected_tile: Option<(usize, usize)>,
+    hovered_tile: Option<(usize, usize)>,
+    elapsed_sec: f32,
+) -> SceneMeshBuffers {
+    let mut dyn_opaque = MeshBuilder::with_capacity(6_000);
+    let mut dyn_alpha = MeshBuilder::with_capacity(2_000);
+
+    // Selection / hover 4-bar perimeter frame hugging terrain height
+    for &(coords, rim_col, y_bias) in &[
+        (selected_tile, [0.96, 0.82, 0.28, 1.0], 0.055),
+        (hovered_tile, [0.52, 0.90, 0.72, 1.0], 0.045),
+    ] {
+        if let Some((tx, tz)) = coords {
+            if let Some(tile) = tiles.get(tz * GRID_SIZE + tx) {
+                let c = tile_world_center(tile);
+                let h = CELL_PITCH * 0.485;
+                let thick = 0.065;
+                let rim_mp = [0.35, 0.0, 0.0, 1.0];
+                let y = c.y + y_bias;
+                dyn_opaque.push_box(Vec3::new(c.x, y, c.z - h), Vec3::new(h, 0.024, thick), 0.0, rim_col, rim_mp);
+                dyn_opaque.push_box(Vec3::new(c.x, y, c.z + h), Vec3::new(h, 0.024, thick), 0.0, rim_col, rim_mp);
+                dyn_opaque.push_box(Vec3::new(c.x - h, y, c.z), Vec3::new(thick, 0.024, h), 0.0, rim_col, rim_mp);
+                dyn_opaque.push_box(Vec3::new(c.x + h, y, c.z), Vec3::new(thick, 0.024, h), 0.0, rim_col, rim_mp);
+            }
+        }
+    }
+
+    // Animated wildfire flames & smoke puffs
+    for tile in tiles {
         if tile.active_fire_intensity > 0.04 {
+            let center = tile_world_center(tile);
+            let hash_seed = ((tile.x * 73856093) ^ (tile.z * 19349663)) as f32;
             build_wildfire_fx(
-                &mut opaque,
-                &mut alpha,
+                &mut dyn_opaque,
+                &mut dyn_alpha,
                 center,
                 tile.active_fire_intensity,
                 elapsed_sec,
@@ -723,32 +764,63 @@ pub fn build_watershed_scene_meshes_animated(
         }
     }
 
-    // 3. Pacific Northwest Timber Field Research Station at Tile (0, 0)
-    if let Some(t0) = tiles.first() {
-        build_field_research_station(&mut opaque, tiles, tile_world_center(t0));
-    }
-
-    // 4. Articulated Field Crews & Quadrotor LiDAR Drones
+    // Articulated Field Crews & Quadrotor LiDAR Drones
     for crew in crews {
-        build_steward_crew(&mut opaque, crew, elapsed_sec);
+        build_steward_crew(&mut dyn_opaque, crew, elapsed_sec);
     }
     for drone in drones {
-        build_lidar_drone(&mut opaque, &mut alpha, drone, elapsed_sec);
+        build_lidar_drone(&mut dyn_opaque, &mut dyn_alpha, drone, elapsed_sec);
     }
 
-    // 5. Anatomically Articulated 3D PNW Wildlife Species
+    // Anatomically Articulated 3D PNW Wildlife Species
     for animal in animals {
-        append_realistic_animal(&mut opaque, animal);
+        append_realistic_animal(&mut dyn_opaque, animal);
     }
 
-    let (opaque_bytes, opaque_vertex_count) = opaque.to_bytes();
-    let (alpha_bytes, alpha_vertex_count) = alpha.to_bytes();
+    let (dyn_op_bytes, dyn_op_cnt) = dyn_opaque.to_bytes();
+    let (dyn_al_bytes, dyn_al_cnt) = dyn_alpha.to_bytes();
+
+    let mut opaque_bytes =
+        Vec::with_capacity(static_cache.opaque_bytes.len() + dyn_op_bytes.len());
+    opaque_bytes.extend_from_slice(&static_cache.opaque_bytes);
+    opaque_bytes.extend_from_slice(&dyn_op_bytes);
+
+    let mut alpha_bytes =
+        Vec::with_capacity(static_cache.alpha_bytes.len() + dyn_al_bytes.len());
+    alpha_bytes.extend_from_slice(&static_cache.alpha_bytes);
+    alpha_bytes.extend_from_slice(&dyn_al_bytes);
+
     SceneMeshBuffers {
         opaque_bytes,
-        opaque_vertex_count,
+        opaque_vertex_count: static_cache.opaque_vertex_count + dyn_op_cnt,
         alpha_bytes,
-        alpha_vertex_count,
+        alpha_vertex_count: static_cache.alpha_vertex_count + dyn_al_cnt,
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_watershed_scene_meshes_animated(
+    tiles: &[TileState],
+    crews: &[StewardCrew],
+    drones: &[CanopyLidarDrone],
+    animals: &[VisibleAnimalAgent],
+    selected_tile: Option<(usize, usize)>,
+    hovered_tile: Option<(usize, usize)>,
+    overlay: MapOverlay,
+    season: Season,
+    elapsed_sec: f32,
+) -> SceneMeshBuffers {
+    let static_cache = build_static_watershed_meshes(tiles, overlay, season);
+    compose_watershed_scene_meshes(
+        &static_cache,
+        tiles,
+        crews,
+        drones,
+        animals,
+        selected_tile,
+        hovered_tile,
+        elapsed_sec,
+    )
 }
 
 fn terrain_vertex_height_and_color(
@@ -2422,6 +2494,22 @@ fn append_realistic_animal(opaque: &mut MeshBuilder, animal: &VisibleAnimalAgent
     }
 }
 
+/// Returns the exact normalized `[r, g, b]` (`0..1`) ramp color for `MapOverlay` colorbar legends.
+pub fn overlay_legend_color(overlay: MapOverlay, t: f32) -> [f32; 3] {
+    let u = t.clamp(0.0, 1.0);
+    match overlay {
+        MapOverlay::NaturalCanopy => [0.15, 0.24, 0.14],
+        MapOverlay::BurnRiskHeatmap => {
+            let r = (u * 1.35).clamp(0.12, 0.96);
+            let g = (1.0 - u * 1.1).clamp(0.10, 0.78);
+            [r, g, 0.14]
+        }
+        MapOverlay::SoilMoistureVpd => [0.45 * (1.0 - u), 0.30 + u * 0.35, 0.18 + u * 0.72],
+        MapOverlay::InvasiveCover => [0.18 + u * 0.75, 0.42 * (1.0 - u * 0.7), 0.20 + u * 0.48],
+        MapOverlay::OldGrowthMaturity => [0.24 * (1.0 - u * 0.6), 0.18 + u * 0.58, 0.14 + u * 0.24],
+    }
+}
+
 fn compute_tile_surface_color(tile: &TileState, overlay: MapOverlay, season: Season) -> [f32; 4] {
     match overlay {
         MapOverlay::NaturalCanopy => {
@@ -2441,21 +2529,20 @@ fn compute_tile_surface_color(tile: &TileState, overlay: MapOverlay, season: Sea
             }
         }
         MapOverlay::BurnRiskHeatmap => {
-            let r = (tile.burn_risk * 1.35).clamp(0.12, 0.96);
-            let g = (1.0 - tile.burn_risk * 1.1).clamp(0.10, 0.78);
-            [r, g, 0.14, 1.0]
+            let c = overlay_legend_color(overlay, tile.burn_risk);
+            [c[0], c[1], c[2], 1.0]
         }
         MapOverlay::SoilMoistureVpd => {
-            let m = tile.soil_moisture.clamp(0.0, 1.0);
-            [0.45 * (1.0 - m), 0.30 + m * 0.35, 0.18 + m * 0.72, 1.0]
+            let c = overlay_legend_color(overlay, tile.soil_moisture);
+            [c[0], c[1], c[2], 1.0]
         }
         MapOverlay::InvasiveCover => {
-            let inv = tile.invasive_cover.clamp(0.0, 1.0);
-            [0.18 + inv * 0.75, 0.42 * (1.0 - inv * 0.7), 0.20 + inv * 0.48, 1.0]
+            let c = overlay_legend_color(overlay, tile.invasive_cover);
+            [c[0], c[1], c[2], 1.0]
         }
         MapOverlay::OldGrowthMaturity => {
-            let og = tile.old_growth_maturity.clamp(0.0, 1.0);
-            [0.24 * (1.0 - og * 0.6), 0.18 + og * 0.58, 0.14 + og * 0.24, 1.0]
+            let c = overlay_legend_color(overlay, tile.old_growth_maturity);
+            [c[0], c[1], c[2], 1.0]
         }
     }
 }

@@ -26,7 +26,10 @@ use crate::ecology::{
     build_initial_watershed, compute_current_vpd_kpa, step_watershed_ecology, ClimateRegime,
     Ecotype, Season, TileState, DAYS_PER_YEAR, GRID_SIZE,
 };
-use crate::models_3d::{build_watershed_scene_meshes_animated, MapOverlay};
+use crate::models_3d::{
+    build_static_watershed_meshes, compose_watershed_scene_meshes, overlay_legend_color, MapOverlay,
+    StaticWatershedMeshCache,
+};
 use crate::persistence::{SaveDatabase, SimulationSaveState};
 use crate::strategies::{
     evaluate_and_apply_action, BudgetLedger, CompatibilityOutcome, RemediationAction,
@@ -41,6 +44,8 @@ use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 use std::collections::VecDeque;
 use std::sync::Arc;
+
+const SPEED_STEPS: [f32; 4] = [1.0, 2.0, 5.0, 10.0];
 
 pub struct CanopyForgeApp {
     pub seed: u64,
@@ -60,6 +65,7 @@ pub struct CanopyForgeApp {
     pub camera: IsometricZoomCamera,
     pub map_overlay: MapOverlay,
     pub selected_manual_tool: RemediationAction,
+    pub inspect_only_click: bool,
     pub brush_3x3: bool,
     pub selected_tile: Option<(usize, usize)>,
     pub hovered_tile: Option<(usize, usize)>,
@@ -67,9 +73,14 @@ pub struct CanopyForgeApp {
     pub event_log: VecDeque<String>,
     pub last_feedback_banner: String,
     pub save_db: Option<SaveDatabase>,
+    pub save_slot_name: String,
+    pub cached_save_slots: Vec<(String, u32, f32)>,
     pub json_modal_open: bool,
     pub json_buffer: String,
     pub show_about_window: bool,
+    static_mesh_cache: Option<StaticWatershedMeshCache>,
+    pub static_mesh_dirty: bool,
+    static_rebuild_accum_sec: f32,
 }
 
 impl CanopyForgeApp {
@@ -82,6 +93,10 @@ impl CanopyForgeApp {
         sync_and_step_visible_animals(&mut visible_animals, &populations, &tiles, 0.016, &mut rng);
 
         let save_db = db_path.and_then(|p| SaveDatabase::open_wal(p).ok());
+        let cached_save_slots = save_db
+            .as_ref()
+            .and_then(|db| db.list_slots().ok())
+            .unwrap_or_default();
         let mut log = VecDeque::with_capacity(64);
         log.push_back(
             "Year 1 Spring: Watershed Stewardship Grant ($140,000) active. Set Strategy crews standing by."
@@ -106,6 +121,7 @@ impl CanopyForgeApp {
             camera: IsometricZoomCamera::default(),
             map_overlay: MapOverlay::NaturalCanopy,
             selected_manual_tool: RemediationAction::InvasiveRemoval,
+            inspect_only_click: false,
             brush_3x3: false,
             selected_tile: Some((4, 4)),
             hovered_tile: None,
@@ -115,9 +131,14 @@ impl CanopyForgeApp {
                 "Select a tile to inspect or apply Manual Interventions — mismatched areas safely yield No Effect."
                     .to_string(),
             save_db,
+            save_slot_name: "watershed_slot_1".to_string(),
+            cached_save_slots,
             json_modal_open: false,
             json_buffer: String::new(),
             show_about_window: false,
+            static_mesh_cache: None,
+            static_mesh_dirty: true,
+            static_rebuild_accum_sec: 0.0,
         }
     }
 
@@ -165,6 +186,74 @@ impl CanopyForgeApp {
             self.event_log.pop_front();
         }
         self.event_log.push_back(msg);
+    }
+
+    pub fn refresh_save_slots(&mut self) {
+        if let Some(db) = &self.save_db {
+            if let Ok(slots) = db.list_slots() {
+                self.cached_save_slots = slots;
+            }
+        }
+    }
+
+    pub fn apply_camera_preset(&mut self, preset: CameraPreset) {
+        let hint = if preset == CameraPreset::FollowWildlifeUnderstoryCam {
+            self.visible_animals
+                .iter()
+                .find(|a| a.species == self.followed_species)
+                .map(|a| a.pos)
+        } else {
+            self.selected_tile
+                .map(|(x, z)| tile_world_center(&self.tiles[z * GRID_SIZE + x]))
+        };
+        self.camera.apply_preset(preset, hint);
+    }
+
+    pub fn preview_manual_intervention(
+        &self,
+        center_x: usize,
+        center_z: usize,
+    ) -> (usize, usize, f64, String) {
+        let season = Season::from_day_of_year(self.day_of_year);
+        let vpd = compute_current_vpd_kpa(self.day_of_year, self.climate_regime);
+        let radius: isize = if self.brush_3x3 { 1 } else { 0 };
+        let cost = self.selected_manual_tool.cost_per_tile();
+        let mut effective_count = 0_usize;
+        let mut neutral_count = 0_usize;
+        let mut sample_reason = String::new();
+
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                let nx = center_x as isize + dx;
+                let nz = center_z as isize + dz;
+                if nx < 0 || nz < 0 || nx >= GRID_SIZE as isize || nz >= GRID_SIZE as isize {
+                    continue;
+                }
+                let mut probe = self.tiles[(nz as usize) * GRID_SIZE + (nx as usize)].clone();
+                match evaluate_and_apply_action(
+                    self.selected_manual_tool,
+                    &mut probe,
+                    season,
+                    vpd,
+                    true,
+                ) {
+                    CompatibilityOutcome::EffectiveSuccess { summary, .. } => {
+                        effective_count += 1;
+                        if sample_reason.is_empty() {
+                            sample_reason = summary;
+                        }
+                    }
+                    CompatibilityOutcome::NoEffectNeutral { reason } => {
+                        neutral_count += 1;
+                        if sample_reason.is_empty() {
+                            sample_reason = reason;
+                        }
+                    }
+                }
+            }
+        }
+        let total_cost = (effective_count as f64) * cost;
+        (effective_count, neutral_count, total_cost, sample_reason)
     }
 
     pub fn apply_manual_intervention_at(&mut self, center_x: usize, center_z: usize) {
@@ -219,6 +308,7 @@ impl CanopyForgeApp {
         }
 
         if applied_count > 0 {
+            self.static_mesh_dirty = true;
             let msg = format!(
                 "Manual {} on {} sector(s): {} ({} neutral skipped, $0 wasted)",
                 self.selected_manual_tool.short_label(),
@@ -249,9 +339,11 @@ impl CanopyForgeApp {
             return;
         }
 
+        let prev_season = Season::from_day_of_year(self.day_of_year);
         // At 1x speed, 1 ecological year (~365 days) passes in ~60 seconds (~6.08 days/sec)
         let dt_days = dt_real_sec * 6.08 * self.sim_speed_mult;
         self.day_of_year += dt_days;
+        self.static_rebuild_accum_sec += dt_real_sec;
 
         let squirrel_bonus = self
             .populations
@@ -293,8 +385,17 @@ impl CanopyForgeApp {
             dt_real_sec,
             self.sim_speed_mult,
         );
+        let had_crew_events = !crew_events.is_empty();
         for ev in crew_events {
             self.push_log(ev);
+        }
+        if ignitions > 0
+            || had_crew_events
+            || Season::from_day_of_year(self.day_of_year) != prev_season
+            || self.static_rebuild_accum_sec >= 0.25
+        {
+            self.static_mesh_dirty = true;
+            self.static_rebuild_accum_sec = 0.0;
         }
 
         step_wildlife_populations(&mut self.populations, &self.tiles, dt_days);
@@ -355,6 +456,7 @@ impl CanopyForgeApp {
 
     pub fn apply_save_state(&mut self, state: SimulationSaveState) {
         self.seed = state.seed;
+        self.rng = ChaCha8Rng::seed_from_u64(state.seed);
         self.day_of_year = state.day_of_year;
         self.climate_regime = state.climate_regime;
         self.ledger = state.ledger;
@@ -371,6 +473,8 @@ impl CanopyForgeApp {
             0.016,
             &mut self.rng,
         );
+        self.static_mesh_dirty = true;
+        self.refresh_save_slots();
     }
 
     pub fn ui_step(&mut self, ctx: &egui::Context, interactive: bool) {
@@ -381,7 +485,10 @@ impl CanopyForgeApp {
         };
 
         if interactive {
-            // Keyboard shortcuts
+            let allow_hotkeys = !ctx.wants_keyboard_input() && !self.json_modal_open;
+            let mut key_preset: Option<CameraPreset> = None;
+            let mut speed_delta: isize = 0;
+
             ctx.input(|i| {
                 if i.key_pressed(egui::Key::F1) {
                     self.show_about_window = !self.show_about_window;
@@ -393,28 +500,68 @@ impl CanopyForgeApp {
                         self.json_modal_open = false;
                     }
                 }
-                if i.key_pressed(egui::Key::Space) {
-                    self.paused = !self.paused;
-                }
-                if i.key_down(egui::Key::Q) {
-                    self.camera.orbit_by(-1.4 * dt, 0.0);
-                }
-                if i.key_down(egui::Key::E) {
-                    self.camera.orbit_by(1.4 * dt, 0.0);
-                }
-                if i.key_down(egui::Key::W) {
-                    self.camera.pan_planar(0.0, 18.0 * dt);
-                }
-                if i.key_down(egui::Key::S) {
-                    self.camera.pan_planar(0.0, -18.0 * dt);
-                }
-                if i.key_down(egui::Key::A) {
-                    self.camera.pan_planar(-18.0 * dt, 0.0);
-                }
-                if i.key_down(egui::Key::D) {
-                    self.camera.pan_planar(18.0 * dt, 0.0);
+                if allow_hotkeys {
+                    if i.key_pressed(egui::Key::Space) {
+                        self.paused = !self.paused;
+                    }
+                    if i.key_down(egui::Key::Q) {
+                        self.camera.orbit_by(-1.4 * dt, 0.0);
+                    }
+                    if i.key_down(egui::Key::E) {
+                        self.camera.orbit_by(1.4 * dt, 0.0);
+                    }
+                    if i.key_down(egui::Key::W) {
+                        self.camera.pan_planar(0.0, 18.0 * dt);
+                    }
+                    if i.key_down(egui::Key::S) {
+                        self.camera.pan_planar(0.0, -18.0 * dt);
+                    }
+                    if i.key_down(egui::Key::A) {
+                        self.camera.pan_planar(-18.0 * dt, 0.0);
+                    }
+                    if i.key_down(egui::Key::D) {
+                        self.camera.pan_planar(18.0 * dt, 0.0);
+                    }
+                    if i.key_pressed(egui::Key::Num1) {
+                        key_preset = Some(CameraPreset::FullWatershedIsometric);
+                    } else if i.key_pressed(egui::Key::Num2) {
+                        key_preset = Some(CameraPreset::MidCanopyStandZoom);
+                    } else if i.key_pressed(egui::Key::Num3) {
+                        key_preset = Some(CameraPreset::SalmonAndBeaverCreekZoom);
+                    } else if i.key_pressed(egui::Key::Num4) {
+                        key_preset = Some(CameraPreset::FollowWildlifeUnderstoryCam);
+                    }
+                    if i.key_pressed(egui::Key::OpenBracket) {
+                        speed_delta = -1;
+                    } else if i.key_pressed(egui::Key::CloseBracket) {
+                        speed_delta = 1;
+                    }
                 }
             });
+
+            if let Some(preset) = key_preset {
+                self.apply_camera_preset(preset);
+            }
+            if speed_delta != 0 {
+                let cur_idx = SPEED_STEPS
+                    .iter()
+                    .enumerate()
+                    .min_by(|(_, a), (_, b)| {
+                        (*a - self.sim_speed_mult)
+                            .abs()
+                            .partial_cmp(&(*b - self.sim_speed_mult).abs())
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    })
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(0);
+                let next_idx = if speed_delta < 0 {
+                    cur_idx.saturating_sub(1)
+                } else {
+                    (cur_idx + 1).min(SPEED_STEPS.len() - 1)
+                };
+                self.sim_speed_mult = SPEED_STEPS[next_idx];
+                self.paused = false;
+            }
 
             self.step_simulation(dt);
         }
@@ -497,15 +644,24 @@ impl CanopyForgeApp {
                     }
 
                     ui.separator();
-                    if ui.button("Save SQLite").clicked() {
+                    if ui
+                        .button("Save SQLite")
+                        .on_hover_text("Save current watershed state into SQLite WAL slot 'quicksave'")
+                        .clicked()
+                    {
                         let snap = self.export_save_state("quicksave");
                         if let Some(db) = &self.save_db {
                             let _ = db.save_slot("quicksave", eri, &snap);
+                            self.refresh_save_slots();
                             self.last_feedback_banner =
                                 "Saved watershed state to SQLite WAL slot 'quicksave'.".to_string();
                         }
                     }
-                    if ui.button("Load").clicked() {
+                    if ui
+                        .button("Load")
+                        .on_hover_text("Load SQLite WAL slot 'quicksave'")
+                        .clicked()
+                    {
                         if let Some(snap) = self
                             .save_db
                             .as_ref()
@@ -612,6 +768,12 @@ impl CanopyForgeApp {
                     ui.separator();
                     ui.heading("Manual Interventions");
                     ui.horizontal(|ui| {
+                        ui.selectable_value(&mut self.inspect_only_click, false, "Click: Apply Tool")
+                            .on_hover_text("Left-click on the 3D watershed selects and applies the selected remediation tool");
+                        ui.selectable_value(&mut self.inspect_only_click, true, "Click: Inspect Only")
+                            .on_hover_text("Left-click on the 3D watershed inspects tile telemetry without spending budget");
+                    });
+                    ui.horizontal(|ui| {
                         ui.selectable_value(&mut self.brush_3x3, false, "1x1 Sector");
                         ui.selectable_value(&mut self.brush_3x3, true, "3x3 Watershed Brush");
                     });
@@ -623,6 +785,7 @@ impl CanopyForgeApp {
                         );
                         if ui
                             .selectable_label(self.selected_manual_tool == action, label)
+                            .on_hover_text(action.label())
                             .clicked()
                         {
                             self.selected_manual_tool = action;
@@ -643,6 +806,7 @@ impl CanopyForgeApp {
                                 })
                             {
                                 target.active_fire_intensity = 0.78;
+                                self.static_mesh_dirty = true;
                                 let coords = (target.x, target.z);
                                 self.push_log(format!(
                                     "Simulated dry-lightning strike ignited high-risk ridge sector ({}, {})!",
@@ -652,13 +816,69 @@ impl CanopyForgeApp {
                         }
                         if ui.button("Trigger VPD Drought").clicked() {
                             self.climate_regime = ClimateRegime::SevereVpdDrought;
-                            self.day_of_year = 175.0;
+                            self.day_of_year = 145.0; // Peak inside Season::Summer (91.25..182.5)
+                            self.static_mesh_dirty = true;
                             self.push_log(
                                 "Entered Severe Summer VPD Drought window (3.65 kPa peak drying)."
                                     .to_string(),
                             );
                         }
                     });
+
+                    ui.separator();
+                    ui.collapsing(
+                        format!("SQLite Save Slots ({})", self.cached_save_slots.len()),
+                        |ui| {
+                            ui.horizontal(|ui| {
+                                ui.add(
+                                    egui::TextEdit::singleline(&mut self.save_slot_name)
+                                        .desired_width(155.0)
+                                        .hint_text("slot_name"),
+                                );
+                                if ui.button("Save Slot").clicked() {
+                                    let slot = if self.save_slot_name.trim().is_empty() {
+                                        "watershed_slot_1".to_string()
+                                    } else {
+                                        self.save_slot_name.trim().to_string()
+                                    };
+                                    let snap = self.export_save_state(&slot);
+                                    if let Some(db) = &self.save_db {
+                                        if db.save_slot(&slot, eri, &snap).is_ok() {
+                                            self.refresh_save_slots();
+                                            self.last_feedback_banner = format!(
+                                                "Saved Year {} (ERI {:.1}) to SQLite slot '{slot}'.",
+                                                self.ledger.current_year, eri
+                                            );
+                                        }
+                                    }
+                                }
+                            });
+                            if self.cached_save_slots.is_empty() {
+                                ui.small("No SQLite slots saved yet.");
+                            } else {
+                                let mut load_slot_name: Option<String> = None;
+                                for (name, yr, slot_eri) in &self.cached_save_slots {
+                                    ui.horizontal(|ui| {
+                                        ui.small(format!("{name} (Yr {yr}, ERI {slot_eri:.1})"));
+                                        if ui.small_button("Load").clicked() {
+                                            load_slot_name = Some(name.clone());
+                                        }
+                                    });
+                                }
+                                if let Some(slot_name) = load_slot_name {
+                                    if let Some(snap) = self
+                                        .save_db
+                                        .as_ref()
+                                        .and_then(|db| db.load_slot(&slot_name).ok().flatten())
+                                    {
+                                        self.apply_save_state(snap);
+                                        self.last_feedback_banner =
+                                            format!("Loaded SQLite save slot '{slot_name}'.");
+                                    }
+                                }
+                            }
+                        },
+                    );
                 });
             });
 
@@ -703,12 +923,22 @@ impl CanopyForgeApp {
                                         },
                                     );
                                 });
-                                ui.small(format!(
-                                    "{} • Pop: {:.0} / K: {:.0}",
-                                    pop.species.scientific_name(),
-                                    pop.count,
-                                    pop.carrying_capacity
-                                ));
+                                if pop.species == WildlifeSpecies::NorthernSpottedOwl {
+                                    ui.small(format!(
+                                        "{} • 256 ha Habitat Idx: {:.1} / K: {:.1}",
+                                        pop.species.scientific_name(),
+                                        pop.count,
+                                        pop.carrying_capacity
+                                    ));
+                                } else {
+                                    ui.small(format!(
+                                        "{} • Pop: {:.0} / K: {:.0} {}",
+                                        pop.species.scientific_name(),
+                                        pop.count,
+                                        pop.carrying_capacity,
+                                        pop.species.unit_label()
+                                    ));
+                                }
                                 let frac = (pop.count / pop.carrying_capacity.max(1.0)).clamp(0.0, 1.0);
                                 ui.add(egui::ProgressBar::new(frac).desired_height(6.0));
                             });
@@ -756,6 +986,74 @@ impl CanopyForgeApp {
                     }
 
                     ui.separator();
+                    ui.heading("Annual Audit & Budget History");
+                    if self.ledger.history.is_empty() {
+                        ui.small("Complete Year 1 to record annual ERI & grant scaling history.");
+                    } else {
+                        let chart_w = ui.available_width().max(180.0);
+                        let (chart_rect, _) =
+                            ui.allocate_exact_size(egui::vec2(chart_w, 64.0), egui::Sense::hover());
+                        let cp = ui.painter_at(chart_rect);
+                        cp.rect_filled(
+                            chart_rect,
+                            egui::CornerRadius::same(4),
+                            egui::Color32::from_rgb(12, 20, 18),
+                        );
+                        let max_budget = self
+                            .ledger
+                            .history
+                            .iter()
+                            .map(|r| r.awarded_next_budget)
+                            .fold(200_000.0_f64, f64::max);
+                        let n = self.ledger.history.len();
+                        let bar_slot = chart_rect.width() / (n as f32);
+                        let mut eri_pts = Vec::with_capacity(n);
+                        for (idx, rec) in self.ledger.history.iter().enumerate() {
+                            let x0 = chart_rect.left() + (idx as f32) * bar_slot + 2.0;
+                            let bw = (bar_slot - 4.0).max(3.0);
+                            let b_frac = (rec.awarded_next_budget / max_budget).clamp(0.05, 1.0) as f32;
+                            let bar_h = b_frac * (chart_rect.height() - 10.0);
+                            cp.rect_filled(
+                                egui::Rect::from_min_size(
+                                    egui::pos2(x0, chart_rect.bottom() - bar_h - 2.0),
+                                    egui::vec2(bw, bar_h),
+                                ),
+                                egui::CornerRadius::same(2),
+                                egui::Color32::from_rgba_unmultiplied(246, 214, 115, 165),
+                            );
+                            let ey = chart_rect.bottom()
+                                - 4.0
+                                - (rec.ecological_recovery_index / 100.0).clamp(0.0, 1.0)
+                                    * (chart_rect.height() - 10.0);
+                            eri_pts.push(egui::pos2(x0 + bw * 0.5, ey));
+                        }
+                        for pair in eri_pts.windows(2) {
+                            cp.line_segment(
+                                [pair[0], pair[1]],
+                                egui::Stroke::new(1.8_f32, egui::Color32::from_rgb(110, 231, 183)),
+                            );
+                        }
+                        for pt in &eri_pts {
+                            cp.circle_filled(*pt, 2.3, egui::Color32::from_rgb(167, 243, 208));
+                        }
+                        cp.rect_stroke(
+                            chart_rect,
+                            egui::CornerRadius::same(4),
+                            egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(46, 72, 62)),
+                            egui::StrokeKind::Inside,
+                        );
+                        if let Some(last) = self.ledger.history.last() {
+                            ui.small(format!(
+                                "Yr {}: ERI {:.1} | Wildlife {:.1}% | Grant ${:.0}",
+                                last.year,
+                                last.ecological_recovery_index,
+                                last.wildlife_recovery_score,
+                                last.awarded_next_budget
+                            ));
+                        }
+                    }
+
+                    ui.separator();
                     ui.heading("Field Crew Telemetry");
                     for crew in &self.crews {
                         ui.small(format!(
@@ -774,7 +1072,7 @@ impl CanopyForgeApp {
             .show(ctx, |ui| {
                 // Floating Camera Zoom Preset & Overlay Bar
                 ui.horizontal_wrapped(|ui| {
-                    ui.strong("Camera:");
+                    ui.strong("Camera [1-4]:");
                     for preset in [
                         CameraPreset::FullWatershedIsometric,
                         CameraPreset::MidCanopyStandZoom,
@@ -785,10 +1083,7 @@ impl CanopyForgeApp {
                             .selectable_label(self.camera.preset == preset, preset.label())
                             .clicked()
                         {
-                            let hint = self.selected_tile.map(|(x, z)| {
-                                tile_world_center(&self.tiles[z * GRID_SIZE + x])
-                            });
-                            self.camera.apply_preset(preset, hint);
+                            self.apply_camera_preset(preset);
                         }
                     }
                     ui.separator();
@@ -799,7 +1094,21 @@ impl CanopyForgeApp {
                             .clicked()
                         {
                             self.map_overlay = ov;
+                            self.static_mesh_dirty = true;
                         }
+                    }
+                    ui.separator();
+                    let mode_lbl = if self.inspect_only_click {
+                        "Mode: Inspect Only"
+                    } else {
+                        "Mode: Apply Tool"
+                    };
+                    if ui
+                        .selectable_label(self.inspect_only_click, mode_lbl)
+                        .on_hover_text("Toggle left-click between Inspect Only and Apply Manual Intervention")
+                        .clicked()
+                    {
+                        self.inspect_only_click = !self.inspect_only_click;
                     }
                 });
 
@@ -834,16 +1143,93 @@ impl CanopyForgeApp {
                 if response.clicked_by(egui::PointerButton::Primary) {
                     if let Some((tx, tz)) = self.hovered_tile {
                         self.selected_tile = Some((tx, tz));
-                        self.apply_manual_intervention_at(tx, tz);
+                        if self.inspect_only_click {
+                            let t = &self.tiles[tz * GRID_SIZE + tx];
+                            let (eff, neu, cost, reason) = self.preview_manual_intervention(tx, tz);
+                            self.last_feedback_banner = format!(
+                                "Inspected ({}, {}) [{}] — Dry-run {}: {} effective / {} neutral (${:.0}): {}",
+                                tx,
+                                tz,
+                                t.ecotype.label(),
+                                self.selected_manual_tool.short_label(),
+                                eff,
+                                neu,
+                                cost,
+                                reason
+                            );
+                        } else {
+                            self.apply_manual_intervention_at(tx, tz);
+                        }
                     }
                 }
 
-                // Submit WGPU 3D PaintCallback
+                if let Some((hx, hz)) = self.hovered_tile {
+                    let t = &self.tiles[hz * GRID_SIZE + hx];
+                    let (eff, neu, cost, reason) = self.preview_manual_intervention(hx, hz);
+                    let tool_name = self.selected_manual_tool.short_label();
+                    let brush_txt = if self.brush_3x3 { "3x3" } else { "1x1" };
+                    let eco_label = t.ecotype.label();
+                    let burn_pct = t.burn_risk * 100.0;
+                    let inv_pct = t.invasive_cover * 100.0;
+                    let og_pct = t.old_growth_maturity * 100.0;
+                    response.on_hover_ui(|ui| {
+                        ui.strong(format!("Sector ({hx}, {hz}) — {eco_label}"));
+                        ui.small(format!(
+                            "Old Growth: {og_pct:.0}% | Burn Risk: {burn_pct:.0}% | Invasive: {inv_pct:.0}%"
+                        ));
+                        ui.separator();
+                        if eff > 0 {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(134, 239, 172),
+                                format!(
+                                    "Dry-Run ({brush_txt} {tool_name}): EffectiveSuccess ({eff} tile(s), {neu} neutral) | Cost: ${cost:.0}"
+                                ),
+                            );
+                        } else {
+                            ui.colored_label(
+                                egui::Color32::from_rgb(203, 213, 225),
+                                format!(
+                                    "Dry-Run ({brush_txt} {tool_name}): NoEffectNeutral | Cost: $0"
+                                ),
+                            );
+                        }
+                        ui.small(reason);
+                    });
+                }
+
+                // Submit WGPU 3D PaintCallback with seasonal sun angle, VPD/smoke fog & cached static geometry
                 let ppp = ctx.pixels_per_point();
                 let pw = ((rect.width() * ppp) as u32).max(64);
                 let ph = ((rect.height() * ppp) as u32).max(64);
 
-                let sun_dir = Vec3::new(0.54, 0.74, 0.40).normalize_or_zero();
+                let season_phase = ((self.day_of_year - 145.0) / DAYS_PER_YEAR) * std::f32::consts::TAU;
+                let summer_t = (season_phase.cos() * 0.5 + 0.5).clamp(0.0, 1.0);
+                let sun_elev = 0.56 + 0.24 * summer_t;
+                let sun_dir = Vec3::new(
+                    0.50 + 0.08 * season_phase.sin(),
+                    sun_elev,
+                    0.36 + 0.08 * (1.0 - summer_t),
+                )
+                .normalize_or_zero();
+                let sun_color = Vec3::new(
+                    1.16 + 0.26 * summer_t,
+                    1.18 + 0.10 * summer_t,
+                    1.24 - 0.22 * summer_t,
+                );
+                let fire_smoke = (self
+                    .tiles
+                    .iter()
+                    .map(|t| t.active_fire_intensity)
+                    .sum::<f32>()
+                    / 4.0)
+                    .clamp(0.0, 1.0);
+                let fog_col = Vec3::new(
+                    0.44 + fire_smoke * 0.22,
+                    0.56 - fire_smoke * 0.08,
+                    0.62 - fire_smoke * 0.20,
+                );
+                let fog_density = 0.0054 + fire_smoke * 0.0048;
+
                 let eye = self.camera.eye_position();
                 let uniforms = SceneFrameUniforms {
                     view_proj: self.camera.view_proj(rect.width() / rect.height().max(1.0)),
@@ -855,19 +1241,36 @@ impl CanopyForgeApp {
                         sun_dir.z,
                         self.elapsed_visual_sec,
                     ),
-                    sun_color_and_vpd: Vec4::new(1.38, 1.25, 1.02, vpd),
-                    fog_color_and_density: Vec4::new(0.46, 0.58, 0.62, 0.0062),
+                    sun_color_and_vpd: Vec4::new(sun_color.x, sun_color.y, sun_color.z, vpd),
+                    fog_color_and_density: Vec4::new(fog_col.x, fog_col.y, fog_col.z, fog_density),
                 };
 
-                let meshes = Arc::new(build_watershed_scene_meshes_animated(
+                let needs_static_rebuild = self.static_mesh_dirty
+                    || self
+                        .static_mesh_cache
+                        .as_ref()
+                        .map(|c| c.overlay != self.map_overlay || c.season != season)
+                        .unwrap_or(true);
+                if needs_static_rebuild {
+                    self.static_mesh_cache = Some(build_static_watershed_meshes(
+                        &self.tiles,
+                        self.map_overlay,
+                        season,
+                    ));
+                    self.static_mesh_dirty = false;
+                }
+                let static_cache = self
+                    .static_mesh_cache
+                    .as_ref()
+                    .expect("static watershed mesh cache populated");
+                let meshes = Arc::new(compose_watershed_scene_meshes(
+                    static_cache,
                     &self.tiles,
                     &self.crews,
                     &self.drones,
                     &self.visible_animals,
                     self.selected_tile,
                     self.hovered_tile,
-                    self.map_overlay,
-                    season,
                     self.elapsed_visual_sec,
                 ));
 
@@ -880,6 +1283,92 @@ impl CanopyForgeApp {
                     },
                 );
                 ui.painter().add(callback);
+
+                // Overlay colorbar legend when MapOverlay != NaturalCanopy
+                if self.map_overlay != MapOverlay::NaturalCanopy && rect.width() > 280.0 && rect.height() > 140.0 {
+                    let painter = ui.painter_at(rect);
+                    let card = egui::Rect::from_min_size(
+                        egui::pos2(rect.left() + 12.0, rect.bottom() - 68.0),
+                        egui::vec2(246.0, 56.0),
+                    );
+                    painter.rect_filled(
+                        card,
+                        egui::CornerRadius::same(6),
+                        egui::Color32::from_rgba_unmultiplied(12, 20, 18, 224),
+                    );
+                    painter.rect_stroke(
+                        card,
+                        egui::CornerRadius::same(6),
+                        egui::Stroke::new(1.0_f32, egui::Color32::from_rgb(72, 118, 98)),
+                        egui::StrokeKind::Inside,
+                    );
+                    painter.text(
+                        egui::pos2(card.left() + 10.0, card.top() + 13.0),
+                        egui::Align2::LEFT_CENTER,
+                        self.map_overlay.label(),
+                        egui::FontId::proportional(11.0),
+                        egui::Color32::from_rgb(226, 232, 240),
+                    );
+                    let bar = egui::Rect::from_min_size(
+                        egui::pos2(card.left() + 10.0, card.top() + 24.0),
+                        egui::vec2(card.width() - 20.0, 10.0),
+                    );
+                    let steps = 24_usize;
+                    let seg_w = bar.width() / steps as f32;
+                    for i in 0..steps {
+                        let t = (i as f32 + 0.5) / steps as f32;
+                        let c = overlay_legend_color(self.map_overlay, t);
+                        let col = egui::Color32::from_rgb(
+                            (c[0] * 255.0).round().clamp(0.0, 255.0) as u8,
+                            (c[1] * 255.0).round().clamp(0.0, 255.0) as u8,
+                            (c[2] * 255.0).round().clamp(0.0, 255.0) as u8,
+                        );
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(bar.left() + (i as f32) * seg_w, bar.top()),
+                                egui::vec2(seg_w + 0.5, bar.height()),
+                            ),
+                            egui::CornerRadius::ZERO,
+                            col,
+                        );
+                    }
+                    painter.rect_stroke(
+                        bar,
+                        egui::CornerRadius::ZERO,
+                        egui::Stroke::new(0.8_f32, egui::Color32::from_rgb(100, 116, 139)),
+                        egui::StrokeKind::Inside,
+                    );
+                    let (t_min, t_mid, t_max) = match self.map_overlay {
+                        MapOverlay::BurnRiskHeatmap => ("0% Low", "50%", "100% Extreme"),
+                        MapOverlay::SoilMoistureVpd => ("0% Dry", "50%", "100% Wet"),
+                        MapOverlay::InvasiveCover => ("0% Clean", "50%", "100% Dense"),
+                        MapOverlay::OldGrowthMaturity => ("0% Young", "50%", "100% Old-Growth"),
+                        MapOverlay::NaturalCanopy => ("", "", ""),
+                    };
+                    let tick_y = bar.bottom() + 10.0;
+                    let tick_col = egui::Color32::from_rgb(186, 204, 198);
+                    painter.text(
+                        egui::pos2(bar.left(), tick_y),
+                        egui::Align2::LEFT_CENTER,
+                        t_min,
+                        egui::FontId::proportional(9.5),
+                        tick_col,
+                    );
+                    painter.text(
+                        egui::pos2(bar.center().x, tick_y),
+                        egui::Align2::CENTER_CENTER,
+                        t_mid,
+                        egui::FontId::proportional(9.5),
+                        tick_col,
+                    );
+                    painter.text(
+                        egui::pos2(bar.right(), tick_y),
+                        egui::Align2::RIGHT_CENTER,
+                        t_max,
+                        egui::FontId::proportional(9.5),
+                        tick_col,
+                    );
+                }
             });
 
         if self.json_modal_open {

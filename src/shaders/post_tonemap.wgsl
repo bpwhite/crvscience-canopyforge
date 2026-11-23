@@ -19,6 +19,16 @@ var hdr_tex: texture_2d<f32>;
 @group(0) @binding(1)
 var hdr_sampler: sampler;
 
+struct TonemapParams {
+    apply_gamma: f32,
+    _pad0: f32,
+    _pad1: f32,
+    _pad2: f32,
+};
+
+@group(0) @binding(2)
+var<uniform> tonemap_params: TonemapParams;
+
 struct FullscreenOut {
     @builtin(position) pos: vec4<f32>,
     @location(0) uv: vec2<f32>,
@@ -50,6 +60,12 @@ fn fs_tonemap(in: FullscreenOut) -> @location(0) vec4<f32> {
     // Gentle corner optical vignette
     let centered = in.uv - vec2<f32>(0.5, 0.5);
     let vig = clamp(1.0 - dot(centered, centered) * 0.22, 0.84, 1.0);
-    let srgb = pow(mapped * vig, vec3<f32>(1.0 / 2.2));
+    let linear_out = mapped * vig;
+    // Linear headless targets (Rgba8Unorm) encode 1/2.2 here; sRGB swapchains encode via hardware.
+    let srgb = select(
+        linear_out,
+        pow(linear_out, vec3<f32>(1.0 / 2.2)),
+        tonemap_params.apply_gamma > 0.5,
+    );
     return vec4<f32>(srgb, 1.0);
 }

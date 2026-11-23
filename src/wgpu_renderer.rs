@@ -64,6 +64,7 @@ pub struct WatershedGpuResources {
     scene_bind_group: wgpu::BindGroup,
     tonemap_bgl: wgpu::BindGroupLayout,
     tonemap_sampler: wgpu::Sampler,
+    tonemap_uniform_buf: wgpu::Buffer,
     shadow_view: wgpu::TextureView,
     vertex_buf: wgpu::Buffer,
     vertex_capacity_bytes: u64,
@@ -371,6 +372,16 @@ impl WatershedGpuResources {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
                 },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
             ],
         });
 
@@ -413,6 +424,20 @@ impl WatershedGpuResources {
             ..Default::default()
         });
 
+        let apply_gamma: f32 = if swapchain_format.is_srgb() { 0.0 } else { 1.0 };
+        let tonemap_uniform_buf = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("tonemap_params_buf"),
+            size: 16,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: true,
+        });
+        {
+            let mut mapped = tonemap_uniform_buf.slice(..).get_mapped_range_mut();
+            mapped[0..4].copy_from_slice(&apply_gamma.to_le_bytes());
+            mapped[4..16].fill(0);
+        }
+        tonemap_uniform_buf.unmap();
+
         let initial_cap = 4 * 1024 * 1024_u64;
         let vertex_buf = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("watershed_dynamic_vbuf"),
@@ -421,8 +446,14 @@ impl WatershedGpuResources {
             mapped_at_creation: false,
         });
 
-        let (msaa_view, hdr_view, depth_view, tonemap_bind_group) =
-            Self::create_offscreen_targets(device, &tonemap_bgl, &tonemap_sampler, 1280, 720);
+        let (msaa_view, hdr_view, depth_view, tonemap_bind_group) = Self::create_offscreen_targets(
+            device,
+            &tonemap_bgl,
+            &tonemap_sampler,
+            &tonemap_uniform_buf,
+            1280,
+            720,
+        );
 
         Self {
             shadow_pipeline,
@@ -434,6 +465,7 @@ impl WatershedGpuResources {
             scene_bind_group,
             tonemap_bgl,
             tonemap_sampler,
+            tonemap_uniform_buf,
             shadow_view,
             vertex_buf,
             vertex_capacity_bytes: initial_cap,
@@ -449,6 +481,7 @@ impl WatershedGpuResources {
         device: &wgpu::Device,
         tonemap_bgl: &wgpu::BindGroupLayout,
         tonemap_sampler: &wgpu::Sampler,
+        tonemap_uniform_buf: &wgpu::Buffer,
         width: u32,
         height: u32,
     ) -> (
@@ -511,6 +544,10 @@ impl WatershedGpuResources {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(tonemap_sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: tonemap_uniform_buf.as_entire_binding(),
+                },
             ],
         });
 
@@ -525,6 +562,7 @@ impl WatershedGpuResources {
                 device,
                 &self.tonemap_bgl,
                 &self.tonemap_sampler,
+                &self.tonemap_uniform_buf,
                 w,
                 h,
             );

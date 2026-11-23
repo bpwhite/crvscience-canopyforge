@@ -432,8 +432,8 @@ pub fn build_initial_watershed(rng: &mut ChaCha8Rng) -> Vec<TileState> {
 }
 
 pub fn compute_current_vpd_kpa(day_of_year: f32, regime: ClimateRegime) -> f32 {
-    // Peak drying occurs around day 165-215 (late Summer in western Oregon)
-    let phase = ((day_of_year - 185.0) / DAYS_PER_YEAR) * std::f32::consts::TAU;
+    // Peak drying occurs around day 145 (mid-late Season::Summer in western Oregon: days 91.25..182.5)
+    let phase = ((day_of_year - 145.0) / DAYS_PER_YEAR) * std::f32::consts::TAU;
     let summer_bell = ((phase.cos() + 1.0) * 0.5).powf(1.7);
     let winter_floor = 0.52;
     winter_floor + (regime.peak_summer_vpd_kpa() - winter_floor) * summer_bell
@@ -491,11 +491,14 @@ pub fn step_watershed_ecology(
                     }
                     if dist <= 1.5 && (dx != 0 || dz != 0) {
                         if ntile.active_fire_intensity > 0.15 {
-                            // Upslope & east-wind fire spread factor
+                            // Upslope + explicit PNW offshore east-wind (-X) advection vector
                             let slope_boost =
                                 (tiles[idx].elevation - ntile.elevation).clamp(-0.2, 0.5) * 0.45;
-                            fire_in +=
-                                (ntile.active_fire_intensity / dist) * (1.0 + slope_boost);
+                            let wind_align = (dx as f32) / dist;
+                            let east_wind_factor = (1.0 + wind_align * 0.48).max(0.45);
+                            fire_in += (ntile.active_fire_intensity / dist)
+                                * (1.0 + slope_boost)
+                                * east_wind_factor;
                         }
                         if ntile.invasive_cover > 0.28 {
                             inv_in += (ntile.invasive_cover - 0.22) * 0.12 / dist;
@@ -674,4 +677,73 @@ pub fn step_watershed_ecology(
     }
 
     (active_fires, new_ignitions)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rand::SeedableRng;
+
+    #[test]
+    fn vpd_peaks_inside_summer_season() {
+        let mut best_day = 0.0_f32;
+        let mut best_vpd = f32::NEG_INFINITY;
+        for d in 0..365 {
+            let day = d as f32;
+            let vpd = compute_current_vpd_kpa(day, ClimateRegime::SevereVpdDrought);
+            if vpd > best_vpd {
+                best_vpd = vpd;
+                best_day = day;
+            }
+        }
+        assert_eq!(
+            Season::from_day_of_year(best_day),
+            Season::Summer,
+            "Peak VPD occurred on day {best_day}, expected Season::Summer"
+        );
+        assert!((best_vpd - ClimateRegime::SevereVpdDrought.peak_summer_vpd_kpa()).abs() < 0.01);
+        assert!(best_vpd > compute_current_vpd_kpa(225.0, ClimateRegime::SevereVpdDrought) + 0.5);
+    }
+
+    #[test]
+    fn offshore_east_wind_advects_wildfire_westward() {
+        let mut rng = ChaCha8Rng::seed_from_u64(77);
+        let mut tiles = build_initial_watershed(&mut rng);
+        for t in &mut tiles {
+            t.elevation = 1.0;
+            t.active_fire_intensity = 0.0;
+            t.recent_burn_scar = 0.0;
+            t.fire_retardant_wetness = 0.0;
+            t.burn_risk = 0.90;
+            t.ladder_fuels = 0.85;
+            t.soil_moisture = 0.15;
+        }
+        // Ignite center tile (8, 8) and run repeated trials to check directional spread (-X vs +X)
+        let mut west_ignitions = 0_usize;
+        let mut east_ignitions = 0_usize;
+        for trial in 0..40_u64 {
+            let mut trial_tiles = tiles.clone();
+            trial_tiles[8 * GRID_SIZE + 8].active_fire_intensity = 0.90;
+            let mut trial_rng = ChaCha8Rng::seed_from_u64(100 + trial);
+            step_watershed_ecology(
+                &mut trial_tiles,
+                1.0,
+                145.0,
+                ClimateRegime::SevereVpdDrought,
+                0.0,
+                0.0,
+                &mut trial_rng,
+            );
+            if trial_tiles[8 * GRID_SIZE + 7].active_fire_intensity > 0.0 {
+                west_ignitions += 1;
+            }
+            if trial_tiles[8 * GRID_SIZE + 9].active_fire_intensity > 0.0 {
+                east_ignitions += 1;
+            }
+        }
+        assert!(
+            west_ignitions > east_ignitions,
+            "Offshore east wind (-X) must drive higher westward spread ({west_ignitions}) than eastward ({east_ignitions})"
+        );
+    }
 }
