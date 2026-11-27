@@ -19,12 +19,17 @@ use canopyforge::agents::{
     compute_wildlife_recovery_score, initial_species_populations, step_wildlife_populations,
     WildlifeSpecies,
 };
-use canopyforge::app::CanopyForgeApp;
+use canopyforge::app::{CanopyForgeApp, CanopyPaletteAction};
 use canopyforge::ecology::{build_initial_watershed, Ecotype, Season};
 use canopyforge::persistence::SaveDatabase;
+use canopyforge::scorecard::{
+    evaluate_century_restoration_scorecard, export_century_scorecard_files,
+    format_century_scorecard_csv, CenturyRestorationScorecard,
+};
 use canopyforge::strategies::{
     evaluate_and_apply_action, BudgetLedger, CompatibilityOutcome, RemediationAction,
 };
+use eframe::egui;
 use rand::SeedableRng;
 use rand_chacha::ChaCha8Rng;
 
@@ -191,4 +196,209 @@ fn sqlite_wal_and_json_roundtrip_preserve_simulation_state() {
         .expect("query sqlite slot")
         .expect("slot exists");
     assert_eq!(loaded.ledger.current_year, snap.ledger.current_year);
+}
+
+#[test]
+fn century_scorecard_projects_100_years_and_shows_active_stewardship_advantage() {
+    let sc = evaluate_century_restoration_scorecard(2026, 100);
+    assert_eq!(sc.schema_version, "canopyforge_century_scorecard_v1");
+    assert_eq!(sc.horizon_years, 100);
+    assert_eq!(sc.scenarios.len(), 3);
+    let passive = &sc.scenarios[0];
+    let active = &sc.scenarios[1];
+    assert_eq!(passive.decadal_eri_trajectory.len(), 10);
+    assert_eq!(active.decadal_eri_trajectory.len(), 10);
+    assert!(
+        active.final_eri > passive.final_eri,
+        "100-year active stewardship ERI ({}) must exceed passive ({})",
+        active.final_eri,
+        passive.final_eri
+    );
+    assert!(sc.eri_advantage_active_vs_passive > 0.0);
+}
+
+#[test]
+fn century_scorecard_json_and_csv_export_roundtrip_are_valid() {
+    let out_dir = std::env::temp_dir().join(format!(
+        "canopyforge_scorecard_test_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&out_dir);
+
+    let (jp, cp, sc) = export_century_scorecard_files(&out_dir, 42, 40)
+        .expect("scorecard export succeeds");
+    assert!(jp.exists());
+    assert!(cp.exists());
+
+    let parsed: CenturyRestorationScorecard =
+        serde_json::from_str(&std::fs::read_to_string(&jp).expect("read json"))
+            .expect("parse json scorecard");
+    assert_eq!(parsed.horizon_years, 40);
+    assert_eq!(parsed.scenarios.len(), sc.scenarios.len());
+
+    let csv = format_century_scorecard_csv(&parsed);
+    let lines: Vec<&str> = csv.lines().collect();
+    assert_eq!(lines.len(), 4, "header + 3 scenarios");
+    assert!(lines[0].starts_with("scenario_code,scenario_label,seed"));
+
+    let _ = std::fs::remove_dir_all(&out_dir);
+}
+
+#[test]
+fn century_scorecard_severe_drought_retains_higher_burn_risk_than_normal() {
+    let sc = evaluate_century_restoration_scorecard(2026, 30);
+    let balanced = &sc.scenarios[1];
+    let drought = &sc.scenarios[2];
+    assert!(
+        drought.final_burn_risk >= balanced.final_burn_risk,
+        "Severe VPD drought burn risk ({}) should be >= balanced ({})",
+        drought.final_burn_risk,
+        balanced.final_burn_risk
+    );
+}
+
+#[test]
+fn ctrl_k_command_palette_opens_filters_and_escapes_in_headless_ui() {
+    let ctx = egui::Context::default();
+    let mut app = CanopyForgeApp::new_simulation(2026, None);
+    let ctrl_k = egui::Event::Key {
+        key: egui::Key::K,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::CTRL,
+    };
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            modifiers: egui::Modifiers::CTRL,
+            events: vec![ctrl_k],
+            ..Default::default()
+        },
+        |c| app.ui_step(c, true),
+    );
+    assert!(app.show_command_palette);
+
+    app.command_palette_query = "Salmonid".to_string();
+    let filtered = app.filtered_palette_commands();
+    assert!(!filtered.is_empty());
+    assert!(filtered[0].0.contains("Salmonid Creek"));
+
+    let esc = egui::Event::Key {
+        key: egui::Key::Escape,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            events: vec![esc],
+            ..Default::default()
+        },
+        |c| app.ui_step(c, true),
+    );
+    assert!(!app.show_command_palette);
+}
+
+#[test]
+fn ctrl_k_respects_text_focus_guard_when_json_or_text_edit_focused() {
+    let ctx = egui::Context::default();
+    let mut app = CanopyForgeApp::new_simulation(2026, None);
+    app.json_modal_open = true;
+    let ctrl_k = egui::Event::Key {
+        key: egui::Key::K,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::CTRL,
+    };
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            modifiers: egui::Modifiers::CTRL,
+            events: vec![ctrl_k],
+            ..Default::default()
+        },
+        |c| app.ui_step(c, true),
+    );
+    assert!(!app.show_command_palette);
+}
+
+#[test]
+fn palette_actions_jump_ecotype_select_tool_switch_season_and_export_scorecard() {
+    let mut app = CanopyForgeApp::new_simulation(2026, None);
+    app.execute_palette_action(CanopyPaletteAction::JumpEcotype(Ecotype::RiparianSalmonCreek));
+    let (sx, sz) = app.selected_tile.expect("tile selected");
+    assert_eq!(app.tiles[sz * 16 + sx].ecotype, Ecotype::RiparianSalmonCreek);
+
+    app.execute_palette_action(CanopyPaletteAction::SelectTool(RemediationAction::InstallBdaAndLwd));
+    assert_eq!(app.selected_manual_tool, RemediationAction::InstallBdaAndLwd);
+
+    app.execute_palette_action(CanopyPaletteAction::JumpSeasonDay(145));
+    assert_eq!(Season::from_day_of_year(app.day_of_year), Season::Summer);
+
+    app.execute_palette_action(CanopyPaletteAction::ToggleAuditModal);
+    assert!(app.show_audit_modal);
+
+    let tmp_dir = std::env::temp_dir().join(format!(
+        "canopyforge_palette_export_{}",
+        std::process::id()
+    ));
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+    app.export_dir_input = tmp_dir.display().to_string();
+    app.execute_palette_action(CanopyPaletteAction::ExportCenturyScorecard);
+    assert!(app.last_scorecard.is_some());
+    assert!(tmp_dir.join("canopyforge_100yr_scorecard.json").exists());
+    assert!(tmp_dir.join("canopyforge_100yr_scorecard.csv").exists());
+    let _ = std::fs::remove_dir_all(&tmp_dir);
+}
+
+#[test]
+fn palette_enter_executes_selected_command() {
+    let ctx = egui::Context::default();
+    let mut app = CanopyForgeApp::new_simulation(2026, None);
+    app.show_command_palette = true;
+    app.command_palette_query = "Summer VPD".to_string();
+    let enter = egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    let _ = ctx.run(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1280.0, 800.0),
+            )),
+            events: vec![enter],
+            ..Default::default()
+        },
+        |c| app.ui_step(c, true),
+    );
+    assert!(!app.show_command_palette);
+    assert!((app.day_of_year - 145.0).abs() < 1e-4);
+}
+
+#[test]
+fn century_scorecard_is_deterministic_for_identical_seed() {
+    let a = evaluate_century_restoration_scorecard(777, 25);
+    let b = evaluate_century_restoration_scorecard(777, 25);
+    assert_eq!(a.scenarios.len(), b.scenarios.len());
+    for (ra, rb) in a.scenarios.iter().zip(b.scenarios.iter()) {
+        assert!((ra.final_eri - rb.final_eri).abs() < 1e-6);
+        assert!((ra.final_burn_risk - rb.final_burn_risk).abs() < 1e-6);
+    }
 }

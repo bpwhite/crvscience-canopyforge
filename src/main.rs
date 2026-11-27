@@ -17,6 +17,7 @@
 #![deny(unsafe_code)]
 
 use canopyforge::app::{render_headless_screenshot, CanopyForgeApp};
+use canopyforge::export_century_scorecard_files;
 use canopyforge::icon::app_egui_icon;
 use clap::{Parser, Subcommand};
 use std::fs;
@@ -65,6 +66,13 @@ enum Commands {
         years: u32,
         #[arg(long)]
         export_json: Option<String>,
+    },
+    /// Run 100-year watershed scenario comparison (Passive vs Balanced vs Severe Drought) and export JSON/CSV scorecard
+    Scorecard {
+        #[arg(long, default_value_t = 100)]
+        years: u32,
+        #[arg(long, default_value = "exports")]
+        out_dir: PathBuf,
     },
 }
 
@@ -137,6 +145,36 @@ fn main() -> eframe::Result<()> {
             }
             Ok(())
         }
+        Commands::Scorecard { years, out_dir } => {
+            match export_century_scorecard_files(&out_dir, cli.seed, years) {
+                Ok((jp, cp, sc)) => {
+                    println!(
+                        "Completed {}-year watershed scorecard (seed {}): Active vs Passive ERI delta {:+.2}, Burn Risk delta {:+.4}",
+                        sc.horizon_years,
+                        sc.seed,
+                        sc.eri_advantage_active_vs_passive,
+                        sc.burn_risk_reduction_active_vs_passive
+                    );
+                    for row in &sc.scenarios {
+                        println!(
+                            "  - {:<38} | ERI {:.2} -> {:.2} ({:+.2}) | Burn {:.1}% | Owl {:.1}",
+                            row.scenario_label,
+                            row.initial_eri,
+                            row.final_eri,
+                            row.eri_delta,
+                            row.final_burn_risk * 100.0,
+                            row.owl_habitat_index
+                        );
+                    }
+                    println!("Wrote JSON -> {} and CSV -> {}", jp.display(), cp.display());
+                }
+                Err(err) => {
+                    eprintln!("Scorecard export error: {err}");
+                    std::process::exit(1);
+                }
+            }
+            Ok(())
+        }
     }
 }
 
@@ -169,6 +207,42 @@ mod tests {
         match parsed.command {
             Some(Commands::Simulate { years, .. }) => assert_eq!(years, 4),
             other => panic!("Expected Simulate command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_parses_scorecard_subcommand_with_years_and_out_dir() {
+        let parsed = Cli::try_parse_from([
+            "canopyforge",
+            "scorecard",
+            "--years",
+            "100",
+            "--out-dir",
+            "custom_exports",
+            "--seed",
+            "99",
+        ])
+        .expect("clap parses scorecard subcommand");
+        assert_eq!(parsed.seed, 99);
+        match parsed.command {
+            Some(Commands::Scorecard { years, out_dir }) => {
+                assert_eq!(years, 100);
+                assert_eq!(out_dir, PathBuf::from("custom_exports"));
+            }
+            other => panic!("Expected Scorecard command, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn cli_scorecard_defaults_to_100_years_and_exports_dir() {
+        let parsed = Cli::try_parse_from(["canopyforge", "scorecard"])
+            .expect("clap parses scorecard defaults");
+        match parsed.command {
+            Some(Commands::Scorecard { years, out_dir }) => {
+                assert_eq!(years, 100);
+                assert_eq!(out_dir, PathBuf::from("exports"));
+            }
+            other => panic!("Expected Scorecard command, got {:?}", other),
         }
     }
 }

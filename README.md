@@ -37,7 +37,8 @@ All keyboard shortcuts are guarded by `!ctx.wants_keyboard_input() && !json_moda
 | `1` / `2` / `3` / `4` | Camera presets | `1` Iso, `2` Mid-Canopy, `3` Creek & BDA, `4` Follow Wildlife |
 | `Space` | Pause / Resume simulation | Halts ecological tick while keeping camera navigation active |
 | `[` / `]` | Step simulation speed | Cycles `1×`, `2×`, `5×`, `10×` |
-| `F1` / `Esc` | Toggle / Close modals | Closes JSON Schema modal or About dialog |
+| `Ctrl+K` | Fuzzy Command Palette | Jump to ecotypes, stewardship actions, seasons, annual audit & exports (`Up`/`Down`/`Enter`/`Esc`) |
+| `F1` / `Esc` | Toggle / Close modals | Closes palette, annual audit, JSON Schema modal, or About dialog |
 
 ## CLI Flags
 
@@ -47,6 +48,7 @@ All keyboard shortcuts are guarded by `!ctx.wants_keyboard_input() && !json_moda
 | --- | --- | --- |
 | *(default)* or `gui` | `gui` | Launch the hardware-accelerated `wgpu` 3D desktop workstation |
 | `simulate --years <N>` | `8` | Run headless multi-year stewardship audit and print ERI, grant, and wildlife summary |
+| `scorecard --years <N> --out-dir <dir>` | `100`, `exports` | Compare 100-year Passive vs. Balanced vs. Severe Drought scenarios & export JSON/CSV scorecard |
 | `--export-json <path>` | — | Export final `SimulationSaveState` JSON snapshot after `simulate` |
 | `--seed <u64>` *(global)* | `2026` | Deterministic `ChaCha8Rng` watershed generation seed |
 | `--headless-screenshot <path>` | — | Render offscreen `1600×1000` `Rgba8Unorm` PNG (with `1/2.2` gamma encoding) |
@@ -64,13 +66,16 @@ cargo run --release
 # Run headless multi-year benchmark (global --seed works anywhere)
 cargo run --release -- simulate --years 12 --seed 42 --export-json audit_run.json
 
+# Export 100-year Passive vs. Balanced vs. Severe Drought restoration scorecard (JSON + CSV)
+cargo run --release -- scorecard --years 100 --out-dir exports --seed 2026
+
 # Render offscreen 1600x1000 WGPU PBR PNG screenshots
 cargo run --release -- --headless-screenshot validation/headless_screenshot.png --screenshot-view 1
 ```
 
 ## Validation & Quality Metrics
 
-- **Automated Tests (`cargo test --all-targets`)**: `12/12` passing (`5` library unit tests + `2` CLI parser tests + `5` ecological invariant integration tests; `0` failed, `0` ignored), verifying zero-harm intervention compatibility, success-scaled annual budgets, summer VPD peak alignment, offshore east-wind (`-X`) wildfire advection, `256 ha` Spotted Owl habitat calibration & excess agent pruning, SQLite WAL & JSON round-trips, finite multi-part 3D geometry, and global `--seed` CLI parsing.
+- **Automated Tests (`cargo test --all-targets`)**: `22/22` passing (`5` library unit tests + `4` CLI parser tests + `13` ecological invariant, palette & 100-year scorecard integration tests; `0` failed, `0` ignored), verifying zero-harm intervention compatibility, success-scaled annual budgets, summer VPD peak alignment, offshore east-wind (`-X`) wildfire advection, `256 ha` Spotted Owl habitat calibration & excess agent pruning, SQLite WAL & JSON round-trips, finite multi-part 3D geometry, `Ctrl+K` fuzzy command palette navigation, 100-year watershed scenario scorecards, and global `--seed` CLI parsing.
 - **Validation Artifacts**: See [validation/canopyforge_validation_summary.json](validation/canopyforge_validation_summary.json), `1600×1000` headless renders in `validation/`, companion preprint [`Preprints/`](Preprints/README.md) (`APP-PREPRINT-23`, Zenodo Concept DOI [`10.5281/zenodo.24442091`](https://doi.org/10.5281/zenodo.24442091)), and [`CITATION.cff`](CITATION.cff).
 
 ## License & Attribution

@@ -31,6 +31,7 @@ use crate::models_3d::{
     StaticWatershedMeshCache,
 };
 use crate::persistence::{SaveDatabase, SimulationSaveState};
+use crate::scorecard::{export_century_scorecard_files, CenturyRestorationScorecard};
 use crate::strategies::{
     evaluate_and_apply_action, BudgetLedger, CompatibilityOutcome, RemediationAction,
     StrategyPortfolio,
@@ -46,6 +47,49 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 const SPEED_STEPS: [f32; 4] = [1.0, 2.0, 5.0, 10.0];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanopyPaletteAction {
+    JumpEcotype(Ecotype),
+    SelectTool(RemediationAction),
+    ToggleBrush3x3,
+    ToggleInspectOnly,
+    JumpSeasonDay(u16),
+    CameraPreset(CameraPreset),
+    TogglePause,
+    ToggleAuditModal,
+    ExportCenturyScorecard,
+    OpenJsonSchema,
+    QuickSaveSqlite,
+}
+
+fn fuzzy_palette_score(query: &str, candidate: &str) -> Option<i32> {
+    let q: Vec<char> = query.trim().to_ascii_lowercase().chars().collect();
+    if q.is_empty() {
+        return Some(0);
+    }
+    let cand_lower = candidate.to_ascii_lowercase();
+    if let Some(pos) = cand_lower.find(&q.iter().collect::<String>()) {
+        return Some(200 - pos as i32);
+    }
+    let mut qi = 0usize;
+    let mut score = 0i32;
+    let mut prev_match = false;
+    for ch in cand_lower.chars() {
+        if qi < q.len() && ch == q[qi] {
+            score += if prev_match { 12 } else { 5 };
+            prev_match = true;
+            qi += 1;
+        } else {
+            prev_match = false;
+        }
+    }
+    if qi == q.len() {
+        Some(score)
+    } else {
+        None
+    }
+}
 
 pub struct CanopyForgeApp {
     pub seed: u64,
@@ -78,6 +122,13 @@ pub struct CanopyForgeApp {
     pub json_modal_open: bool,
     pub json_buffer: String,
     pub show_about_window: bool,
+    pub show_command_palette: bool,
+    pub command_palette_query: String,
+    pub command_palette_selected: usize,
+    pub palette_focus_pending: bool,
+    pub show_audit_modal: bool,
+    pub export_dir_input: String,
+    pub last_scorecard: Option<CenturyRestorationScorecard>,
     static_mesh_cache: Option<StaticWatershedMeshCache>,
     pub static_mesh_dirty: bool,
     static_rebuild_accum_sec: f32,
@@ -136,6 +187,13 @@ impl CanopyForgeApp {
             json_modal_open: false,
             json_buffer: String::new(),
             show_about_window: false,
+            show_command_palette: false,
+            command_palette_query: String::new(),
+            command_palette_selected: 0,
+            palette_focus_pending: false,
+            show_audit_modal: false,
+            export_dir_input: "exports".to_string(),
+            last_scorecard: None,
             static_mesh_cache: None,
             static_mesh_dirty: true,
             static_rebuild_accum_sec: 0.0,
@@ -477,6 +535,151 @@ impl CanopyForgeApp {
         self.refresh_save_slots();
     }
 
+    pub fn jump_to_ecotype(&mut self, ecotype: Ecotype) {
+        if let Some(tile) = self.tiles.iter().find(|t| t.ecotype == ecotype) {
+            let coords = (tile.x, tile.z);
+            let center = tile_world_center(tile);
+            self.selected_tile = Some(coords);
+            self.camera.apply_preset(CameraPreset::MidCanopyStandZoom, Some(center));
+            self.last_feedback_banner = format!(
+                "Jumped to {} at sector ({}, {})",
+                ecotype.label(),
+                coords.0,
+                coords.1
+            );
+        }
+    }
+
+    pub fn export_century_scorecard_to_dir(&mut self) {
+        let dir = if self.export_dir_input.trim().is_empty() {
+            "exports"
+        } else {
+            self.export_dir_input.trim()
+        };
+        match export_century_scorecard_files(dir, self.seed, 100) {
+            Ok((jp, cp, sc)) => {
+                self.last_feedback_banner = format!(
+                    "Exported 100-yr scorecard (Active vs Passive ERI {:+.2}) -> {} & {}",
+                    sc.eri_advantage_active_vs_passive,
+                    jp.display(),
+                    cp.display()
+                );
+                self.last_scorecard = Some(sc);
+            }
+            Err(err) => {
+                self.last_feedback_banner = format!("100-yr scorecard export error: {err}");
+            }
+        }
+    }
+
+    pub fn palette_commands() -> Vec<(&'static str, &'static str, CanopyPaletteAction)> {
+        vec![
+            ("Ecotype: Remnant Old-Growth Core", "Ecotypes", CanopyPaletteAction::JumpEcotype(Ecotype::OldGrowthCore)),
+            ("Ecotype: Dense Second-Growth Plantation", "Ecotypes", CanopyPaletteAction::JumpEcotype(Ecotype::DenseSecondGrowth)),
+            ("Ecotype: Incised Salmonid Creek Corridor", "Ecotypes", CanopyPaletteAction::JumpEcotype(Ecotype::RiparianSalmonCreek)),
+            ("Ecotype: Degraded Clearcut Edge", "Ecotypes", CanopyPaletteAction::JumpEcotype(Ecotype::DegradedClearcutEdge)),
+            ("Ecotype: Upland Oak-Conifer Meadow Ridge", "Ecotypes", CanopyPaletteAction::JumpEcotype(Ecotype::UplandMeadowRidge)),
+            ("Action: Crosscut Thinning ($2,400)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::ThinningFromBelow)),
+            ("Action: Prescribed Burn ($1,800)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::PrescribedUnderburn)),
+            ("Action: Remove Invasives ($2,100)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::InvasiveRemoval)),
+            ("Action: BDA & Large Wood ($3,200)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::InstallBdaAndLwd)),
+            ("Action: Native Underplant ($2,600)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::NativeMycorrhizalPlanting)),
+            ("Action: Snag & Owl Dens ($2,900)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::LegacySnagAndOwlCavity)),
+            ("Action: Suppress / Wet ($1,500)", "Stewardship", CanopyPaletteAction::SelectTool(RemediationAction::FirebreakAndMoisten)),
+            ("Stewardship: Toggle 1x1 Sector vs 3x3 Brush", "Stewardship", CanopyPaletteAction::ToggleBrush3x3),
+            ("Stewardship: Toggle Inspect Only vs Apply Tool", "Stewardship", CanopyPaletteAction::ToggleInspectOnly),
+            ("Season: Jump to Spring Freshet (Day 15)", "Seasons", CanopyPaletteAction::JumpSeasonDay(15)),
+            ("Season: Jump to Summer VPD Peak (Day 145)", "Seasons", CanopyPaletteAction::JumpSeasonDay(145)),
+            ("Season: Jump to Autumn Coho Spawn (Day 220)", "Seasons", CanopyPaletteAction::JumpSeasonDay(220)),
+            ("Season: Jump to Winter Rain & Snowpack (Day 310)", "Seasons", CanopyPaletteAction::JumpSeasonDay(310)),
+            ("Camera: Full Watershed Isometric (1)", "Views", CanopyPaletteAction::CameraPreset(CameraPreset::FullWatershedIsometric)),
+            ("Camera: Mid-Canopy Stand Zoom (2)", "Views", CanopyPaletteAction::CameraPreset(CameraPreset::MidCanopyStandZoom)),
+            ("Camera: Salmon & Beaver Creek Zoom (3)", "Views", CanopyPaletteAction::CameraPreset(CameraPreset::SalmonAndBeaverCreekZoom)),
+            ("Camera: Follow Wildlife Understory (4)", "Views", CanopyPaletteAction::CameraPreset(CameraPreset::FollowWildlifeUnderstoryCam)),
+            ("Simulation: Play / Pause (Space)", "Simulation", CanopyPaletteAction::TogglePause),
+            ("Audit: Open Annual Audit & History Summary", "Audit", CanopyPaletteAction::ToggleAuditModal),
+            ("Export: 100-Year Watershed Scenario Scorecard (JSON + CSV)", "Exports", CanopyPaletteAction::ExportCenturyScorecard),
+            ("Export: Open Save JSON Schema Modal", "Exports", CanopyPaletteAction::OpenJsonSchema),
+            ("Save: Quicksave Watershed to SQLite WAL", "Exports", CanopyPaletteAction::QuickSaveSqlite),
+        ]
+    }
+
+    pub fn filtered_palette_commands(&self) -> Vec<(&'static str, &'static str, CanopyPaletteAction)> {
+        let q = self.command_palette_query.trim();
+        let all = Self::palette_commands();
+        if q.is_empty() {
+            return all;
+        }
+        let mut scored: Vec<(i32, (&'static str, &'static str, CanopyPaletteAction))> = all
+            .into_iter()
+            .filter_map(|item| {
+                let hay = format!("{} {}", item.1, item.0);
+                fuzzy_palette_score(q, &hay).map(|s| (s, item))
+            })
+            .collect();
+        scored.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1 .0.cmp(b.1 .0)));
+        scored.into_iter().map(|(_, item)| item).collect()
+    }
+
+    pub fn execute_palette_action(&mut self, action: CanopyPaletteAction) {
+        match action {
+            CanopyPaletteAction::JumpEcotype(eco) => self.jump_to_ecotype(eco),
+            CanopyPaletteAction::SelectTool(tool) => {
+                self.selected_manual_tool = tool;
+                self.last_feedback_banner = format!("Selected manual tool: {}", tool.label());
+            }
+            CanopyPaletteAction::ToggleBrush3x3 => {
+                self.brush_3x3 = !self.brush_3x3;
+                self.last_feedback_banner = if self.brush_3x3 {
+                    "Switched stewardship brush to 3x3 Watershed Brush".to_string()
+                } else {
+                    "Switched stewardship brush to 1x1 Sector".to_string()
+                };
+            }
+            CanopyPaletteAction::ToggleInspectOnly => {
+                self.inspect_only_click = !self.inspect_only_click;
+                self.last_feedback_banner = if self.inspect_only_click {
+                    "Switched click mode to Inspect Only".to_string()
+                } else {
+                    "Switched click mode to Apply Tool".to_string()
+                };
+            }
+            CanopyPaletteAction::JumpSeasonDay(day) => {
+                self.day_of_year = day as f32;
+                self.static_mesh_dirty = true;
+                let s = Season::from_day_of_year(self.day_of_year);
+                self.last_feedback_banner = format!("Jumped to {} (Day {})", s.label(), day);
+            }
+            CanopyPaletteAction::CameraPreset(preset) => self.apply_camera_preset(preset),
+            CanopyPaletteAction::TogglePause => {
+                self.paused = !self.paused;
+            }
+            CanopyPaletteAction::ToggleAuditModal => {
+                self.show_audit_modal = !self.show_audit_modal;
+            }
+            CanopyPaletteAction::ExportCenturyScorecard => {
+                self.export_century_scorecard_to_dir();
+            }
+            CanopyPaletteAction::OpenJsonSchema => {
+                self.json_buffer = self
+                    .export_save_state("json_export")
+                    .to_json_pretty()
+                    .unwrap_or_default();
+                self.json_modal_open = true;
+            }
+            CanopyPaletteAction::QuickSaveSqlite => {
+                let eri = self.ecological_recovery_index();
+                let snap = self.export_save_state("quicksave");
+                if let Some(db) = &self.save_db {
+                    let _ = db.save_slot("quicksave", eri, &snap);
+                    self.refresh_save_slots();
+                    self.last_feedback_banner =
+                        "Saved watershed state to SQLite WAL slot 'quicksave'.".to_string();
+                }
+            }
+        }
+    }
+
     pub fn ui_step(&mut self, ctx: &egui::Context, interactive: bool) {
         let dt = if interactive {
             ctx.input(|i| i.stable_dt).clamp(0.001, 0.1)
@@ -485,16 +688,32 @@ impl CanopyForgeApp {
         };
 
         if interactive {
-            let allow_hotkeys = !ctx.wants_keyboard_input() && !self.json_modal_open;
+            let wants_kb = ctx.wants_keyboard_input();
+            let allow_hotkeys = !wants_kb && !self.json_modal_open && !self.show_command_palette;
             let mut key_preset: Option<CameraPreset> = None;
             let mut speed_delta: isize = 0;
 
             ctx.input(|i| {
-                if i.key_pressed(egui::Key::F1) {
+                let cmd = i.modifiers.ctrl || i.modifiers.command;
+                if cmd && i.key_pressed(egui::Key::K) {
+                    if self.show_command_palette {
+                        self.show_command_palette = false;
+                    } else if !wants_kb && !self.json_modal_open {
+                        self.show_command_palette = true;
+                        self.command_palette_query.clear();
+                        self.command_palette_selected = 0;
+                        self.palette_focus_pending = true;
+                    }
+                }
+                if i.key_pressed(egui::Key::F1) && !self.show_command_palette {
                     self.show_about_window = !self.show_about_window;
                 }
                 if i.key_pressed(egui::Key::Escape) {
-                    if self.show_about_window {
+                    if self.show_command_palette {
+                        self.show_command_palette = false;
+                    } else if self.show_audit_modal {
+                        self.show_audit_modal = false;
+                    } else if self.show_about_window {
                         self.show_about_window = false;
                     } else if self.json_modal_open {
                         self.json_modal_open = false;
@@ -679,6 +898,23 @@ impl CanopyForgeApp {
                             .to_json_pretty()
                             .unwrap_or_default();
                         self.json_modal_open = true;
+                    }
+                    if ui
+                        .button("100-Yr Scorecard")
+                        .on_hover_text("Compare 100-year Passive vs Balanced vs Drought restoration scenarios (JSON + CSV)")
+                        .clicked()
+                    {
+                        self.export_century_scorecard_to_dir();
+                    }
+                    if ui
+                        .button("Palette (Ctrl+K)")
+                        .on_hover_text("Open fuzzy command palette (Ctrl+K)")
+                        .clicked()
+                    {
+                        self.show_command_palette = true;
+                        self.command_palette_query.clear();
+                        self.command_palette_selected = 0;
+                        self.palette_focus_pending = true;
                     }
                     if ui.button("About").clicked() {
                         self.show_about_window = !self.show_about_window;
@@ -1251,7 +1487,7 @@ impl CanopyForgeApp {
                         .as_ref()
                         .map(|c| c.overlay != self.map_overlay || c.season != season)
                         .unwrap_or(true);
-                if needs_static_rebuild {
+                if needs_static_rebuild || self.static_mesh_cache.is_none() {
                     self.static_mesh_cache = Some(build_static_watershed_meshes(
                         &self.tiles,
                         self.map_overlay,
@@ -1259,10 +1495,9 @@ impl CanopyForgeApp {
                     ));
                     self.static_mesh_dirty = false;
                 }
-                let static_cache = self
-                    .static_mesh_cache
-                    .as_ref()
-                    .expect("static watershed mesh cache populated");
+                let static_cache = self.static_mesh_cache.get_or_insert_with(|| {
+                    build_static_watershed_meshes(&self.tiles, self.map_overlay, season)
+                });
                 let meshes = Arc::new(compose_watershed_scene_meshes(
                     static_cache,
                     &self.tiles,
@@ -1435,6 +1670,134 @@ impl CanopyForgeApp {
                 });
             if !open {
                 self.show_about_window = false;
+            }
+        }
+
+        if self.show_audit_modal {
+            let mut open = self.show_audit_modal;
+            egui::Window::new("Annual Watershed Audit & 100-Yr Scorecard")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(true)
+                .default_width(560.0)
+                .show(ctx, |ui| {
+                    ui.label(format!(
+                        "Year {} | ERI {:.2}/100 | Mean Burn Risk {:.1}% | Grant ${:.0}",
+                        self.ledger.current_year,
+                        eri,
+                        self.mean_burn_risk() * 100.0,
+                        self.ledger.annual_grant
+                    ));
+                    ui.separator();
+                    if self.ledger.history.is_empty() {
+                        ui.small("No completed annual audits yet; run simulation across Year 1 rollover.");
+                    } else {
+                        egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                            for rec in &self.ledger.history {
+                                ui.small(format!(
+                                    "Year {}: ERI {:.1} | Wildlife {:.1}% | Next Grant ${:.0}",
+                                    rec.year,
+                                    rec.ecological_recovery_index,
+                                    rec.wildlife_recovery_score,
+                                    rec.awarded_next_budget
+                                ));
+                            }
+                        });
+                    }
+                    ui.separator();
+                    if ui.button("Export 100-Year Scenario Scorecard (JSON + CSV)").clicked() {
+                        self.export_century_scorecard_to_dir();
+                    }
+                    if let Some(sc) = &self.last_scorecard {
+                        ui.small(format!(
+                            "Last Scorecard ({}-yr, seed {}): Active vs Passive ERI {:+.2}, Burn Risk reduction {:+.4}",
+                            sc.horizon_years,
+                            sc.seed,
+                            sc.eri_advantage_active_vs_passive,
+                            sc.burn_risk_reduction_active_vs_passive
+                        ));
+                    }
+                });
+            if !open {
+                self.show_audit_modal = false;
+            }
+        }
+
+        if self.show_command_palette {
+            let filtered = self.filtered_palette_commands();
+            if !filtered.is_empty() {
+                self.command_palette_selected = self.command_palette_selected.min(filtered.len() - 1);
+            } else {
+                self.command_palette_selected = 0;
+            }
+            let (up_pressed, down_pressed, enter_pressed) = ctx.input(|i| {
+                (
+                    i.key_pressed(egui::Key::ArrowUp),
+                    i.key_pressed(egui::Key::ArrowDown),
+                    i.key_pressed(egui::Key::Enter),
+                )
+            });
+            if up_pressed && !filtered.is_empty() {
+                self.command_palette_selected = if self.command_palette_selected == 0 {
+                    filtered.len() - 1
+                } else {
+                    self.command_palette_selected - 1
+                };
+            }
+            if down_pressed && !filtered.is_empty() {
+                self.command_palette_selected = (self.command_palette_selected + 1) % filtered.len();
+            }
+            let mut exec_act: Option<CanopyPaletteAction> = if enter_pressed {
+                filtered.get(self.command_palette_selected).map(|(_, _, a)| *a)
+            } else {
+                None
+            };
+            let mut open = self.show_command_palette;
+            egui::Window::new("Command Palette (Ctrl+K)")
+                .open(&mut open)
+                .collapsible(false)
+                .resizable(false)
+                .anchor(egui::Align2::CENTER_TOP, egui::Vec2::new(0.0, 56.0))
+                .default_width(540.0)
+                .show(ctx, |ui| {
+                    let edit = ui.add(
+                        egui::TextEdit::singleline(&mut self.command_palette_query)
+                            .id(egui::Id::new("canopyforge_cmd_palette_input"))
+                            .desired_width(f32::INFINITY)
+                            .hint_text("Jump to ecotypes, stewardship actions, seasons, audit, or exports..."),
+                    );
+                    if self.palette_focus_pending {
+                        edit.request_focus();
+                        self.palette_focus_pending = false;
+                    }
+                    if edit.changed() {
+                        self.command_palette_selected = 0;
+                    }
+                    ui.add_space(4.0);
+                    egui::ScrollArea::vertical().max_height(270.0).show(ui, |ui| {
+                        if filtered.is_empty() {
+                            ui.small("No matching commands.");
+                        } else {
+                            for (idx, (label, group, act)) in filtered.iter().enumerate() {
+                                let selected = idx == self.command_palette_selected;
+                                if ui
+                                    .selectable_label(selected, format!("[{group}] {label}"))
+                                    .clicked()
+                                {
+                                    exec_act = Some(*act);
+                                }
+                            }
+                        }
+                    });
+                    ui.separator();
+                    ui.small("Up/Down: Navigate  |  Enter: Execute  |  Esc: Close");
+                });
+            if !open {
+                self.show_command_palette = false;
+            }
+            if let Some(act) = exec_act {
+                self.show_command_palette = false;
+                self.execute_palette_action(act);
             }
         }
 

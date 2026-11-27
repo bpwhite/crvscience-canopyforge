@@ -22,5 +22,12 @@ pub mod ecology;
 pub mod icon;
 pub mod models_3d;
 pub mod persistence;
+pub mod scorecard;
 pub mod strategies;
 pub mod wgpu_renderer;
+
+pub use scorecard::{
+    evaluate_century_restoration_scorecard, export_century_scorecard_files,
+    format_century_scorecard_csv, CenturyRestorationScorecard, ScenarioPresetKind,
+    WatershedScenarioResult,
+};
