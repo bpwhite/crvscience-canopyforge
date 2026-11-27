@@ -2,6 +2,8 @@
 
 Native safe-Rust (`#![forbid(unsafe_code)]`) 3D isometric and zoomable Pacific Northwest (PNW) old-growth forest restoration "idle + active stewardship" simulation game built on `eframe`/`egui` `0.31`, `wgpu` `24.0` WGSL PBR shaders, `glam` `0.29`, `rusqlite` `0.32` (WAL mode), and `clap` `4.5`.
 
+![CanopyForge Workbench](validation/headless_screenshot.png)
+
 ## Documentation
 
 - [User Guide](docs/USER_GUIDE.md) — Interactive controls, Inspect vs. Apply click modes, dry-run hover tooltips, multi-slot SQLite saves, and annual audit charts.
